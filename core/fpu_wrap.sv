@@ -13,7 +13,9 @@
 // Description: Wrapper for the floating-point unit
 
 
-module fpu_wrap import ariane_pkg::*; (
+module fpu_wrap import ariane_pkg::*; #(
+  parameter ariane_pkg::cva6_cfg_t cva6_cfg = ariane_pkg::cva6_cfg_empty
+) (
   input  logic                     clk_i,
   input  logic                     rst_ni,
   input  logic                     flush_i,
@@ -54,28 +56,25 @@ module fpu_wrap import ariane_pkg::*; (
       Width:         unsigned'(riscv::XLEN), // parameterized using XLEN
       EnableVectors: ariane_pkg::XFVEC,
       EnableNanBox:  1'b1,
-      FpFmtMask:     {RVF, RVD, XF16, XF8, XF16ALT, XF8ALT},
+      FpFmtMask:     {RVF, RVD, XF16, XF8, XF16ALT},
       IntFmtMask:    {XFVEC && XF8, XFVEC && (XF16 || XF16ALT), 1'b1, 1'b1}
     };
 
     // Implementation (number of registers etc)
     localparam fpnew_pkg::fpu_implementation_t FPU_IMPLEMENTATION = '{
-      PipeRegs:  '{// FP32, FP64, FP16, FP8, FP16alt, FP8alt
+      PipeRegs:  '{// FP32, FP64, FP16, FP8, FP16alt
                  '{unsigned'(LAT_COMP_FP32   ),
                    unsigned'(LAT_COMP_FP64   ),
                    unsigned'(LAT_COMP_FP16   ),
                    unsigned'(LAT_COMP_FP8    ),
-                   unsigned'(LAT_COMP_FP16ALT),
-                   unsigned'(LAT_COMP_FP8ALT)}, // ADDMUL
+                   unsigned'(LAT_COMP_FP16ALT)}, // ADDMUL
                  '{default: unsigned'(LAT_DIVSQRT)}, // DIVSQRT
                  '{default: unsigned'(LAT_NONCOMP)}, // NONCOMP
-                 '{default: unsigned'(LAT_CONV)},    // CONV
-                 '{default: unsigned'(LAT_SDOTP)}},  // DOTP
+                 '{default: unsigned'(LAT_CONV)}},   // CONV
       UnitTypes: '{'{default: fpnew_pkg::PARALLEL}, // ADDMUL
                    '{default: fpnew_pkg::MERGED},   // DIVSQRT
                    '{default: fpnew_pkg::PARALLEL}, // NONCOMP
-                   '{default: fpnew_pkg::MERGED},   // CONV
-                   '{default: fpnew_pkg::DISABLED}},  // DOTP
+                   '{default: fpnew_pkg::MERGED}},  // CONV
       PipeConfig: fpnew_pkg::DISTRIBUTED
     };
 
@@ -526,7 +525,6 @@ module fpu_wrap import ariane_pkg::*; (
     ) i_fpnew_bulk (
       .clk_i,
       .rst_ni,
-      .hart_id_i      ( '0                                  ),
       .operands_i     ( fpu_operands                        ),
       .rnd_mode_i     ( fpnew_pkg::roundmode_e'(fpu_rm)     ),
       .op_i           ( fpnew_pkg::operation_e'(fpu_op)     ),
@@ -536,7 +534,7 @@ module fpu_wrap import ariane_pkg::*; (
       .int_fmt_i      ( fpnew_pkg::int_format_e'(fpu_ifmt)  ),
       .vectorial_op_i ( fpu_vec_op                          ),
       .tag_i          ( fpu_tag                             ),
-      .simd_mask_i    ( '1                                  ),
+      .simd_mask_i    ( 1'b1                                ),
       .in_valid_i     ( fpu_in_valid                        ),
       .in_ready_o     ( fpu_in_ready                        ),
       .flush_i,

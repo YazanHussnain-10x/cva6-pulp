@@ -17,6 +17,7 @@
 // --------------
 
 module miss_handler import ariane_pkg::*; import std_cache_pkg::*; #(
+    parameter ariane_pkg::cva6_cfg_t cva6_cfg = ariane_pkg::cva6_cfg_empty,
     parameter int unsigned NR_PORTS       = 3,
     parameter int unsigned AXI_ADDR_WIDTH = 0,
     parameter int unsigned AXI_DATA_WIDTH = 0,
@@ -26,12 +27,10 @@ module miss_handler import ariane_pkg::*; import std_cache_pkg::*; #(
 )(
     input  logic                                        clk_i,
     input  logic                                        rst_ni,
-    output logic                                        busy_o,       // miss handler or axi is busy
     input  logic                                        flush_i,      // flush request
     output logic                                        flush_ack_o,  // acknowledge successful flush
     output logic                                        miss_o,
     input  logic                                        busy_i,       // dcache is busy with something
-    input  logic                                        init_ni,      // do not init after reset
     // Bypass or miss
     input  logic [NR_PORTS-1:0][$bits(miss_req_t)-1:0]  miss_req_i,
     // Bypass handling
@@ -138,15 +137,6 @@ module miss_handler import ariane_pkg::*; import std_cache_pkg::*; #(
     ariane_pkg::amo_t amo_op;
     logic [63:0]      amo_operand_b;
 
-    // Busy signals
-    logic bypass_axi_busy, miss_axi_busy;
-    assign busy_o = bypass_axi_busy | miss_axi_busy | (state_q != IDLE);
-
-    struct packed {
-        logic [63:3] address;
-        logic        valid;
-    } reservation_d, reservation_q;
-
     // ------------------------------
     // Cache Management
     // ------------------------------
@@ -154,7 +144,7 @@ module miss_handler import ariane_pkg::*; import std_cache_pkg::*; #(
         automatic logic [DCACHE_SET_ASSOC-1:0] evict_way, valid_way;
 
         for (int unsigned i = 0; i < DCACHE_SET_ASSOC; i++) begin
-            evict_way[i] = data_i[i].valid & (|data_i[i].dirty);
+            evict_way[i] = data_i[i].valid & data_i[i].dirty;
             valid_way[i] = data_i[i].valid;
         end
         // ----------------------
@@ -214,9 +204,15 @@ module miss_handler import ariane_pkg::*; import std_cache_pkg::*; #(
                 // lowest priority are AMOs, wait until everything else is served before going for the AMOs
                 if (amo_req_i.req && !busy_i) begin
                     // 1. Flush the cache
-                    state_d = FLUSH_REQ_STATUS;
-                    serve_amo_d = 1'b1;
-                    cnt_d = '0;
+                    if (!serve_amo_q) begin
+                        state_d = FLUSH_REQ_STATUS;
+                        serve_amo_d = 1'b1;
+                        cnt_d = '0;
+                    // 2. Do the AMO
+                    end else begin
+                        state_d = AMO_REQ;
+                        serve_amo_d = 1'b0;
+                    end
                 end
                 // check if we want to flush and can flush e.g.: we are not busy anymore
                 // TODO: Check that the busy flag is indeed needed
@@ -261,11 +257,10 @@ module miss_handler import ariane_pkg::*; import std_cache_pkg::*; #(
                     lfsr_enable = 1'b1;
                     evict_way_d = lfsr_oh;
                     // do we need to write back the cache line?
-                    if (|data_i[lfsr_bin].dirty) begin
+                    if (data_i[lfsr_bin].dirty) begin
                         state_d = WB_CACHELINE_MISS;
                         evict_cl_d.tag = data_i[lfsr_bin].tag;
                         evict_cl_d.data = data_i[lfsr_bin].data;
-                        evict_cl_d.dirty = data_i[lfsr_bin].dirty;
                         cnt_d = mshr_q.addr[DCACHE_INDEX_WIDTH-1:0];
                     // no - we can request a cache line now
                     end else
@@ -300,15 +295,12 @@ module miss_handler import ariane_pkg::*; import std_cache_pkg::*; #(
                     addr_o       = mshr_q.addr[DCACHE_INDEX_WIDTH-1:0];
                     req_o        = evict_way_q;
                     we_o         = 1'b1;
-                    be_o.tag     = '1;
-                    be_o.data    = '1;
-                    for (int unsigned i = 0; i < DCACHE_SET_ASSOC; i++) begin
-                      if (evict_way_q[i]) be_o.vldrty[i] = '1;
-                    end
+                    be_o         = '1;
+                    be_o.vldrty  = evict_way_q;
                     data_o.tag   = mshr_q.addr[DCACHE_TAG_WIDTH+DCACHE_INDEX_WIDTH-1:DCACHE_INDEX_WIDTH];
                     data_o.data  = data_miss_fsm;
                     data_o.valid = 1'b1;
-                    data_o.dirty = '0;
+                    data_o.dirty = 1'b0;
 
                     // is this a write?
                     if (mshr_q.we) begin
@@ -319,7 +311,7 @@ module miss_handler import ariane_pkg::*; import std_cache_pkg::*; #(
                                 data_o.data[(cl_offset + i*8) +: 8] = mshr_q.wdata[i];
                         end
                         // its immediately dirty if we write
-                        data_o.dirty[cl_offset>>3 +: 8] = mshr_q.be;
+                        data_o.dirty = 1'b1;
                     end
                     // reset MSHR
                     mshr_d.valid = 1'b0;
@@ -336,7 +328,7 @@ module miss_handler import ariane_pkg::*; import std_cache_pkg::*; #(
 
                 req_fsm_miss_valid  = 1'b1;
                 req_fsm_miss_addr   = {evict_cl_q.tag, cnt_q[DCACHE_INDEX_WIDTH-1:DCACHE_BYTE_OFFSET], {{DCACHE_BYTE_OFFSET}{1'b0}}};
-                req_fsm_miss_be     = evict_cl_q.dirty;
+                req_fsm_miss_be     = '1;
                 req_fsm_miss_we     = 1'b1;
                 req_fsm_miss_wdata  = evict_cl_q.data;
 
@@ -348,9 +340,7 @@ module miss_handler import ariane_pkg::*; import std_cache_pkg::*; #(
                     we_o       = 1'b1;
                     data_o.valid = INVALIDATE_ON_FLUSH ? 1'b0 : 1'b1;
                     // invalidate
-                    for (int unsigned i = 0; i < DCACHE_SET_ASSOC; i++) begin
-                      if (evict_way_q[i]) be_o.vldrty[i] = '1;
-                    end
+                    be_o.vldrty = evict_way_q;
                     // go back to handling the miss or flushing, depending on where we came from
                     state_d = (state_q == WB_CACHELINE_MISS) ? MISS : FLUSH_REQ_STATUS;
                 end
@@ -387,13 +377,7 @@ module miss_handler import ariane_pkg::*; import std_cache_pkg::*; #(
                     if (cnt_q[DCACHE_INDEX_WIDTH-1:DCACHE_BYTE_OFFSET] == DCACHE_NUM_WORDS-1) begin
                         // only acknowledge if the flush wasn't triggered by an atomic
                         flush_ack_o = ~serve_amo_q;
-                        //if we are servicing flushing because of an AMO go to serve it
-                        if (serve_amo_q) begin
-                           state_d = AMO_REQ;
-                            serve_amo_d = 1'b0;
-                        end else begin
-                            state_d     = IDLE;
-                        end
+                        state_d     = IDLE;
                     end
                 end
             end
@@ -408,7 +392,7 @@ module miss_handler import ariane_pkg::*; import std_cache_pkg::*; #(
                 be_o.vldrty = '1;
                 cnt_d       = cnt_q + (1'b1 << DCACHE_BYTE_OFFSET);
                 // finished initialization
-                if (cnt_q[DCACHE_INDEX_WIDTH-1:DCACHE_BYTE_OFFSET] == DCACHE_NUM_WORDS-1 || init_ni)
+                if (cnt_q[DCACHE_INDEX_WIDTH-1:DCACHE_BYTE_OFFSET] == DCACHE_NUM_WORDS-1)
                     state_d = IDLE;
             end
             // ----------------------
@@ -586,6 +570,7 @@ module miss_handler import ariane_pkg::*; import std_cache_pkg::*; #(
     assign bypass_addr = bypass_adapter_req.addr;
 
     axi_adapter #(
+        .cva6_cfg              ( cva6_cfg           ),
         .DATA_WIDTH            ( 64                 ),
         .CACHELINE_BYTE_OFFSET ( DCACHE_BYTE_OFFSET ),
         .AXI_ADDR_WIDTH        ( AXI_ADDR_WIDTH     ),
@@ -596,7 +581,6 @@ module miss_handler import ariane_pkg::*; import std_cache_pkg::*; #(
     ) i_bypass_axi_adapter (
         .clk_i                (clk_i),
         .rst_ni               (rst_ni),
-        .busy_o               (bypass_axi_busy),
         .req_i                (bypass_adapter_req.req),
         .type_i               (bypass_adapter_req.reqtype),
         .amo_i                (bypass_adapter_req.amo),
@@ -624,6 +608,7 @@ module miss_handler import ariane_pkg::*; import std_cache_pkg::*; #(
     assign miss_addr = req_fsm_miss_addr;
 
     axi_adapter  #(
+        .cva6_cfg              ( cva6_cfg           ),
         .DATA_WIDTH            ( DCACHE_LINE_WIDTH  ),
         .CACHELINE_BYTE_OFFSET ( DCACHE_BYTE_OFFSET ),
         .AXI_ADDR_WIDTH        ( AXI_ADDR_WIDTH     ),
@@ -634,7 +619,6 @@ module miss_handler import ariane_pkg::*; import std_cache_pkg::*; #(
     ) i_miss_axi_adapter (
         .clk_i,
         .rst_ni,
-        .busy_o              ( miss_axi_busy      ),
         .req_i               ( req_fsm_miss_valid ),
         .type_i              ( req_fsm_miss_req   ),
         .amo_i               ( AMO_NONE           ),

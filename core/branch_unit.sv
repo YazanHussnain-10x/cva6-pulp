@@ -12,10 +12,11 @@
 // Date: 09.05.2017
 // Description: Branch target calculation and comparison
 
-module branch_unit (
+module branch_unit #(
+    parameter ariane_pkg::cva6_cfg_t cva6_cfg = ariane_pkg::cva6_cfg_empty
+) (
     input  logic                      clk_i,
     input  logic                      rst_ni,
-    input  logic                      v_i,
     input  logic                      debug_mode_i,
     input  ariane_pkg::fu_data_t      fu_data_i,
     input  logic [riscv::VLEN-1:0]    pc_i,                   // PC of instruction
@@ -89,9 +90,6 @@ module branch_unit (
         branch_exception_o.cause = riscv::INSTR_ADDR_MISALIGNED;
         branch_exception_o.valid = 1'b0;
         branch_exception_o.tval  = {{riscv::XLEN-riscv::VLEN{pc_i[riscv::VLEN-1]}}, pc_i};
-        branch_exception_o.tval2 = {riscv::GPLEN{1'b0}};
-        branch_exception_o.tinst = {riscv::XLEN{1'b0}};
-        branch_exception_o.gva   = ariane_pkg::RVH ? v_i : 1'b0;
         // only throw exception if this is indeed a branch
         if (branch_valid_i && target_address[0] != 1'b0) branch_exception_o.valid = 1'b1;
     end

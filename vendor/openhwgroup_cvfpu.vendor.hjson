@@ -13,9 +13,9 @@
     // Upstream repository
     upstream: {
         // URL
-        url: "https://github.com/pulp-platform/cvfpu",
+        url: "https://github.com/openhwgroup/cvfpu",
         // revision
-        rev: "pulp-v0.1.1",
+        rev: "v0.7.0",
     }
 
     // Patch dir for local changes
@@ -29,8 +29,6 @@
         "ips_list.yml",
         "src_files.yml",
         "tb",
-        "util",
-        "vendor",
     ]
 }
 

@@ -14,6 +14,7 @@
 //
 
 module cva6_icache_axi_wrapper import ariane_pkg::*; import wt_cache_pkg::*; #(
+  parameter ariane_pkg::cva6_cfg_t cva6_cfg = ariane_pkg::cva6_cfg_empty,
   parameter ariane_cfg_t ArianeCfg = ArianeDefaultConfig,  // contains cacheable regions
   parameter int unsigned AxiAddrWidth = 0,
   parameter int unsigned AxiDataWidth = 0,
@@ -28,9 +29,6 @@ module cva6_icache_axi_wrapper import ariane_pkg::*; import wt_cache_pkg::*; #(
   input  logic              flush_i,     // flush the icache, flush and kill have to be asserted together
   input  logic              en_i,        // enable icache
   output logic              miss_o,      // to performance counter
-  output logic              busy_o,
-  input  logic              stall_i,
-  input  logic              init_ni,
   // address translation requests
   input  icache_areq_i_t    areq_i,
   output icache_areq_o_t    areq_o,
@@ -103,6 +101,7 @@ module cva6_icache_axi_wrapper import ariane_pkg::*; import wt_cache_pkg::*; #(
   // -------
   cva6_icache #(
     // use ID 0 for icache reads
+    .cva6_cfg           ( cva6_cfg      ),
     .RdTxId             ( 0             ),
     .ArianeCfg          ( ArianeCfg     )
   ) i_cva6_icache (
@@ -111,9 +110,6 @@ module cva6_icache_axi_wrapper import ariane_pkg::*; import wt_cache_pkg::*; #(
     .flush_i            ( flush_i             ),
     .en_i               ( en_i                ),
     .miss_o             ( miss_o              ),
-    .busy_o             ( busy_o              ),
-    .stall_i            ( stall_i             ),
-    .init_ni            ( init_ni             ),
     .areq_i             ( areq_i              ),
     .areq_o             ( areq_o              ),
     .dreq_i             ( dreq_i              ),
@@ -129,6 +125,7 @@ module cva6_icache_axi_wrapper import ariane_pkg::*; import wt_cache_pkg::*; #(
   // AXI shim
   // --------
     axi_shim #(
+    .cva6_cfg        ( cva6_cfg       ),
     .AxiNumWords     ( AxiNumWords    ),
     .AxiAddrWidth    ( AxiAddrWidth   ),
     .AxiDataWidth    ( AxiDataWidth   ),

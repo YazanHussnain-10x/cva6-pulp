@@ -14,14 +14,13 @@
 
 
 module wt_dcache_ctrl import ariane_pkg::*; import wt_cache_pkg::*; #(
+  parameter ariane_pkg::cva6_cfg_t cva6_cfg = ariane_pkg::cva6_cfg_empty,
   parameter logic [CACHE_ID_WIDTH-1:0]  RdTxId    = 1,                              // ID to use for read transactions
   parameter ariane_pkg::ariane_cfg_t    ArianeCfg = ariane_pkg::ArianeDefaultConfig // contains cacheable regions
 ) (
   input  logic                            clk_i,          // Clock
   input  logic                            rst_ni,         // Asynchronous reset active low
   input  logic                            cache_en_i,
-  output logic                            busy_o,
-  input  logic                            stall_i,        // stall new memory requests
   // core request ports
   input  dcache_req_i_t                   req_port_i,
   output dcache_req_o_t                   req_port_o,
@@ -99,8 +98,6 @@ module wt_dcache_ctrl import ariane_pkg::*; import wt_cache_pkg::*; #(
   assign rd_ack_d     = rd_ack_i;
   assign rd_tag_only_o = '0;
 
-  assign busy_o = (state_q != IDLE);
-
 ///////////////////////////////////////////////////////
 // main control logic
 ///////////////////////////////////////////////////////
@@ -119,7 +116,7 @@ module wt_dcache_ctrl import ariane_pkg::*; import wt_cache_pkg::*; #(
         //////////////////////////////////
         // wait for an incoming request
         IDLE: begin
-          if (req_port_i.data_req && !stall_i) begin
+          if (req_port_i.data_req) begin
             rd_req_o = 1'b1;
             // if read ack then ack the `req_port_o`, and goto `READ` state
             if (rd_ack_i) begin

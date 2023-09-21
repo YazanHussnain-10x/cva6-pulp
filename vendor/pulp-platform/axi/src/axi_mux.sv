@@ -22,7 +22,6 @@
 // a response with ID `6'b100110` will be forwarded to slave port 2 (`2'b10`).
 
 // register macros
-`include "common_cells/assertions.svh"
 `include "common_cells/registers.svh"
 
 module axi_mux #(
@@ -70,83 +69,8 @@ module axi_mux #(
 
   // pass through if only one slave port
   if (NoSlvPorts == 32'h1) begin : gen_no_mux
-    spill_register #(
-      .T       ( mst_aw_chan_t ),
-      .Bypass  ( ~SpillAw      )
-    ) i_aw_spill_reg (
-      .clk_i   ( clk_i                    ),
-      .rst_ni  ( rst_ni                   ),
-      .valid_i ( slv_reqs_i[0].aw_valid   ),
-      .ready_o ( slv_resps_o[0].aw_ready  ),
-      .data_i  ( slv_reqs_i[0].aw         ),
-      .valid_o ( mst_req_o.aw_valid       ),
-      .ready_i ( mst_resp_i.aw_ready      ),
-      .data_o  ( mst_req_o.aw             )
-    );
-    spill_register #(
-      .T       ( w_chan_t ),
-      .Bypass  ( ~SpillW  )
-    ) i_w_spill_reg (
-      .clk_i   ( clk_i                   ),
-      .rst_ni  ( rst_ni                  ),
-      .valid_i ( slv_reqs_i[0].w_valid   ),
-      .ready_o ( slv_resps_o[0].w_ready  ),
-      .data_i  ( slv_reqs_i[0].w         ),
-      .valid_o ( mst_req_o.w_valid       ),
-      .ready_i ( mst_resp_i.w_ready      ),
-      .data_o  ( mst_req_o.w             )
-    );
-    spill_register #(
-      .T       ( mst_b_chan_t ),
-      .Bypass  ( ~SpillB      )
-    ) i_b_spill_reg (
-      .clk_i   ( clk_i                  ),
-      .rst_ni  ( rst_ni                 ),
-      .valid_i ( mst_resp_i.b_valid     ),
-      .ready_o ( mst_req_o.b_ready      ),
-      .data_i  ( mst_resp_i.b           ),
-      .valid_o ( slv_resps_o[0].b_valid ),
-      .ready_i ( slv_reqs_i[0].b_ready  ),
-      .data_o  ( slv_resps_o[0].b       )
-    );
-    spill_register #(
-      .T       ( mst_ar_chan_t ),
-      .Bypass  ( ~SpillAr      )
-    ) i_ar_spill_reg (
-      .clk_i   ( clk_i                    ),
-      .rst_ni  ( rst_ni                   ),
-      .valid_i ( slv_reqs_i[0].ar_valid   ),
-      .ready_o ( slv_resps_o[0].ar_ready  ),
-      .data_i  ( slv_reqs_i[0].ar         ),
-      .valid_o ( mst_req_o.ar_valid       ),
-      .ready_i ( mst_resp_i.ar_ready      ),
-      .data_o  ( mst_req_o.ar             )
-    );
-    spill_register #(
-      .T       ( mst_r_chan_t ),
-      .Bypass  ( ~SpillR      )
-    ) i_r_spill_reg (
-      .clk_i   ( clk_i                  ),
-      .rst_ni  ( rst_ni                 ),
-      .valid_i ( mst_resp_i.r_valid     ),
-      .ready_o ( mst_req_o.r_ready      ),
-      .data_i  ( mst_resp_i.r           ),
-      .valid_o ( slv_resps_o[0].r_valid ),
-      .ready_i ( slv_reqs_i[0].r_ready  ),
-      .data_o  ( slv_resps_o[0].r       )
-    );
-// Validate parameters.
-// pragma translate_off
-    `ASSERT_INIT(CorrectIdWidthSlvAw, $bits(slv_reqs_i[0].aw.id) == SlvAxiIDWidth)
-    `ASSERT_INIT(CorrectIdWidthSlvB, $bits(slv_resps_o[0].b.id) == SlvAxiIDWidth)
-    `ASSERT_INIT(CorrectIdWidthSlvAr, $bits(slv_reqs_i[0].ar.id) == SlvAxiIDWidth)
-    `ASSERT_INIT(CorrectIdWidthSlvR, $bits(slv_resps_o[0].r.id) == SlvAxiIDWidth)
-    `ASSERT_INIT(CorrectIdWidthMstAw, $bits(mst_req_o.aw.id) == SlvAxiIDWidth)
-    `ASSERT_INIT(CorrectIdWidthMstB, $bits(mst_resp_i.b.id) == SlvAxiIDWidth)
-    `ASSERT_INIT(CorrectIdWidthMstAr, $bits(mst_req_o.ar.id) == SlvAxiIDWidth)
-    `ASSERT_INIT(CorrectIdWidthMstR, $bits(mst_resp_i.r.id) == SlvAxiIDWidth)
-// pragma translate_on
-
+    assign mst_req_o      = slv_reqs_i[0];
+    assign slv_resps_o[0] = mst_resp_i;
   // other non degenerate cases
   end else begin : gen_mux
 
@@ -326,7 +250,7 @@ module axi_mux #(
       .full_o    ( w_fifo_full                               ),
       .empty_o   ( w_fifo_empty                              ),
       .usage_o   (                                           ),
-      .data_i    ( mst_aw_chan.id[SlvAxiIDWidth+:MstIdxBits] ),
+      .data_i    ( mst_aw_chan.id[(SlvAxiIDWidth-1)+:MstIdxBits] ),
       .push_i    ( w_fifo_push                               ),
       .data_o    ( w_fifo_data                               ),
       .pop_i     ( w_fifo_pop                                )
@@ -386,7 +310,7 @@ module axi_mux #(
     // replicate B channels
     assign slv_b_chans  = {NoSlvPorts{mst_b_chan}};
     // control B channel handshake
-    assign switch_b_id  = mst_b_chan.id[SlvAxiIDWidth+:MstIdxBits];
+    assign switch_b_id  = mst_b_chan.id[(SlvAxiIDWidth-1)+:MstIdxBits];
     assign slv_b_valids = (mst_b_valid) ? (1 << switch_b_id) : '0;
 
     spill_register #(
@@ -445,7 +369,7 @@ module axi_mux #(
     // replicate R channels
     assign slv_r_chans  = {NoSlvPorts{mst_r_chan}};
     // R channel handshake control
-    assign switch_r_id  = mst_r_chan.id[SlvAxiIDWidth+:MstIdxBits];
+    assign switch_r_id  = mst_r_chan.id[(SlvAxiIDWidth-1)+:MstIdxBits];
     assign slv_r_valids = (mst_r_valid) ? (1 << switch_r_id) : '0;
 
     spill_register #(

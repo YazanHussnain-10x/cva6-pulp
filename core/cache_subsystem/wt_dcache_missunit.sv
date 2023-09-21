@@ -15,6 +15,7 @@
 
 
 module wt_dcache_missunit import ariane_pkg::*; import wt_cache_pkg::*; #(
+  parameter ariane_pkg::cva6_cfg_t cva6_cfg = ariane_pkg::cva6_cfg_empty,
   parameter bit                         AxiCompliant  = 1'b0, // set this to 1 when using in conjunction with AXI bus adapter
   parameter logic [CACHE_ID_WIDTH-1:0]  AmoTxId       = 1,    // TX id to be used for AMOs
   parameter int unsigned                NumPorts      = 3,    // number of miss ports
@@ -27,11 +28,9 @@ module wt_dcache_missunit import ariane_pkg::*; import wt_cache_pkg::*; #(
   input  logic                                       flush_i,     // flush request, this waits for pending tx (write, read) to finish and will clear the cache
   output logic                                       flush_ack_o, // send a single cycle acknowledge signal when the cache is flushed
   output logic                                       miss_o,      // we missed on a ld/st
-  output logic                                       busy_o,      // missunit is busy
   // local cache management signals
   input  logic                                       wbuffer_empty_i,
   output logic                                       cache_en_o,  // local cache enable signal
-  input  logic                                       init_ni,     // no init after reset
   // AMO interface
   input  amo_req_t                                   amo_req_i,
   output amo_resp_t                                  amo_resp_o,
@@ -73,8 +72,40 @@ module wt_dcache_missunit import ariane_pkg::*; import wt_cache_pkg::*; #(
   output dcache_req_t                                mem_data_o
 );
 
+  // functions
+  function automatic logic [ariane_pkg::DCACHE_SET_ASSOC-1:0] dcache_way_bin2oh (
+    input logic [L1D_WAY_WIDTH-1:0] in
+  );
+    logic [ariane_pkg::DCACHE_SET_ASSOC-1:0] out;
+    out     = '0;
+    out[in] = 1'b1;
+    return out;
+  endfunction
+
+  // align the physical address to the specified size:
+  // 000: bytes
+  // 001: hword
+  // 010: word
+  // 011: dword
+  // 111: DCACHE line
+  function automatic logic [riscv::PLEN-1:0] paddrSizeAlign(
+    input logic [riscv::PLEN-1:0] paddr,
+    input logic [2:0]  size
+  );
+    logic [riscv::PLEN-1:0] out;
+    out = paddr;
+    unique case (size)
+      3'b001: out[0:0]                     = '0;
+      3'b010: out[1:0]                     = '0;
+      3'b011: out[2:0]                     = '0;
+      3'b111: out[DCACHE_OFFSET_WIDTH-1:0] = '0;
+      default: ;
+    endcase
+    return out;
+  endfunction : paddrSizeAlign
+
   // controller FSM
-  typedef enum logic[2:0] {IDLE, DRAIN, AMO, FLUSH, INIT, STORE_WAIT, LOAD_WAIT, AMO_WAIT} state_e;
+  typedef enum logic[2:0] {IDLE, DRAIN, AMO,  FLUSH, STORE_WAIT, LOAD_WAIT, AMO_WAIT} state_e;
   state_e state_d, state_q;
 
   // MSHR for reads
@@ -126,8 +157,6 @@ module wt_dcache_missunit import ariane_pkg::*; import wt_cache_pkg::*; #(
   assign miss_req_masked_d = (lock_reqs)  ? miss_req_masked_q      :
                              (mask_reads) ? miss_we_i & miss_req_i : miss_req_i;
   assign miss_is_write     = miss_we_i[miss_port_idx];
-
-  assign busy_o = state_q != IDLE;
 
   // read port arbiter
   lzc #(
@@ -255,7 +284,7 @@ module wt_dcache_missunit import ariane_pkg::*; import wt_cache_pkg::*; #(
   assign mem_data_o.amo_op = (amo_sel) ? amo_req_i.amo_op    : AMO_NONE;
 
   assign tmp_paddr         = (amo_sel) ? amo_req_i.operand_a[riscv::PLEN-1:0] : miss_paddr_i[miss_port_idx];
-  assign mem_data_o.paddr  = wt_cache_pkg::paddrSizeAlign(tmp_paddr, mem_data_o.size);
+  assign mem_data_o.paddr  = paddrSizeAlign(tmp_paddr, mem_data_o.size);
 
 ///////////////////////////////////////////////////////
 // back-off mechanism for LR/SC completion guarantee
@@ -387,8 +416,8 @@ module wt_dcache_missunit import ariane_pkg::*; import wt_cache_pkg::*; #(
     amo_resp_o.ack   = 1'b0;
     miss_replay_o    = '0;
 
-    // disabling cache is possible anytime, enabling goes via flush if we init
-    enable_d         = (enable_q | init_ni) & enable_i;
+    // disabling cache is possible anytime, enabling goes via flush
+    enable_d         = enable_q & enable_i;
     flush_ack_d      = flush_ack_q;
     flush_en         = 1'b0;
     amo_sel          = 1'b0;
@@ -497,12 +526,6 @@ module wt_dcache_missunit import ariane_pkg::*; import wt_cache_pkg::*; #(
         end
       end
       //////////////////////////////////
-      // initialize the cache
-      INIT: begin
-        // flush, unless we want to skip init
-        state_d = (init_ni) ? IDLE : FLUSH;
-      end
-      //////////////////////////////////
       // send out amo op request
       AMO: begin
         mem_data_o.rtype = DCACHE_ATOMIC_REQ;
@@ -538,7 +561,7 @@ module wt_dcache_missunit import ariane_pkg::*; import wt_cache_pkg::*; #(
 
 always_ff @(posedge clk_i or negedge rst_ni) begin : p_regs
   if (!rst_ni) begin
-    state_q               <= INIT;
+    state_q               <= FLUSH;
     cnt_q                 <= '0;
     enable_q              <= '0;
     flush_ack_q           <= '0;

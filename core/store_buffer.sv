@@ -14,7 +14,9 @@
 //              if they are no longer speculative
 
 
-module store_buffer import ariane_pkg::*; (
+module store_buffer import ariane_pkg::*; #(
+    parameter ariane_pkg::cva6_cfg_t cva6_cfg = ariane_pkg::cva6_cfg_empty
+) (
     input logic          clk_i,           // Clock
     input logic          rst_ni,          // Asynchronous reset active low
     input logic          flush_i,         // if we flush we need to pause the transactions on the memory
@@ -71,7 +73,7 @@ module store_buffer import ariane_pkg::*; (
     // Speculative Queue - Core Interface
     // ----------------------------------------
     always_comb begin : core_if
-        automatic logic [DEPTH_SPEC:0] speculative_status_cnt;
+        automatic logic [$clog2(DEPTH_SPEC):0] speculative_status_cnt;
         speculative_status_cnt = speculative_status_cnt_q;
 
         // we are ready if the speculative and the commit queue have a space left
@@ -143,7 +145,7 @@ module store_buffer import ariane_pkg::*; (
     assign mem_paddr_o              = commit_queue_n[commit_read_pointer_n].address;
 
     always_comb begin : store_if
-        automatic logic [DEPTH_COMMIT:0] commit_status_cnt;
+        automatic logic [$clog2(DEPTH_COMMIT):0] commit_status_cnt;
         commit_status_cnt = commit_status_cnt_q;
 
         commit_ready_o = (commit_status_cnt_q < DEPTH_COMMIT);

@@ -15,17 +15,18 @@
 
 
 module issue_stage import ariane_pkg::*; #(
+    parameter ariane_pkg::cva6_cfg_t cva6_cfg = ariane_pkg::cva6_cfg_empty,
     parameter int unsigned NR_ENTRIES = 8,
     parameter int unsigned NR_WB_PORTS = 4,
     parameter int unsigned NR_COMMIT_PORTS = 2
 )(
     input  logic                                     clk_i,     // Clock
     input  logic                                     rst_ni,    // Asynchronous reset active low
-    input  logic                                     rst_uarch_ni,
 
     output logic                                     sb_full_o,
     input  logic                                     flush_unissued_instr_i,
     input  logic                                     flush_i,
+    input  logic                                     stall_i,   // Stall issue stage
     // from ISSUE
     input  scoreboard_entry_t                        decoded_instr_i,
     input  logic                                     decoded_instr_valid_i,
@@ -37,7 +38,6 @@ module issue_stage import ariane_pkg::*; #(
     output fu_data_t                                 fu_data_o,
     output logic [riscv::VLEN-1:0]                   pc_o,
     output logic                                     is_compressed_instr_o,
-    output riscv::xlen_t                             tinst_o,
     input  logic                                     flu_ready_i,
     output logic                                     alu_valid_o,
     // ex just resolved our predicted branch, we are ready to accept new requests
@@ -63,6 +63,10 @@ module issue_stage import ariane_pkg::*; #(
     output logic                                     x_issue_valid_o,
     input  logic                                     x_issue_ready_i,
     output logic [31:0]                              x_off_instr_o,
+
+    // to accelerator dispatcher
+    output scoreboard_entry_t                        issue_instr_o,
+    output logic                                     issue_instr_hs_o,
 
     // write back port
     input logic [NR_WB_PORTS-1:0][TRANS_ID_BITS-1:0] trans_id_i,
@@ -121,12 +125,17 @@ module issue_stage import ariane_pkg::*; #(
     assign rs1_forwarding_o = rs1_forwarding_xlen[riscv::VLEN-1:0];
     assign rs2_forwarding_o = rs2_forwarding_xlen[riscv::VLEN-1:0];
 
+    assign issue_instr_o    = issue_instr_sb_iro;
+    assign issue_instr_hs_o = issue_instr_valid_sb_iro & issue_ack_iro_sb;
+
     // ---------------------------------------------------------
     // 1. Re-name
     // ---------------------------------------------------------
-    re_name i_re_name (
+    re_name #(
+        .cva6_cfg   ( cva6_cfg   )
+    ) i_re_name (
         .clk_i                  ( clk_i                        ),
-        .rst_ni                 ( rst_uarch_ni                 ),
+        .rst_ni                 ( rst_ni                       ),
         .flush_i                ( flush_i                      ),
         .flush_unissied_instr_i ( flush_unissued_instr_i       ),
         .issue_instr_i          ( decoded_instr_i              ),
@@ -141,12 +150,11 @@ module issue_stage import ariane_pkg::*; #(
     // 2. Manage instructions in a scoreboard
     // ---------------------------------------------------------
     scoreboard #(
+        .cva6_cfg   ( cva6_cfg  ),
         .NR_ENTRIES (NR_ENTRIES ),
         .NR_WB_PORTS(NR_WB_PORTS),
         .NR_COMMIT_PORTS(NR_COMMIT_PORTS)
     ) i_scoreboard (
-        .rst_ni                ( rst_uarch_ni                              ),
-
         .sb_full_o             ( sb_full_o                                 ),
         .unresolved_branch_i   ( 1'b0                                      ),
         .rd_clobber_gpr_o      ( rd_clobber_gpr_sb_iro                     ),
@@ -185,6 +193,7 @@ module issue_stage import ariane_pkg::*; #(
     // 3. Issue instruction and read operand, also commit
     // ---------------------------------------------------------
     issue_read_operands #(
+      .cva6_cfg        ( cva6_cfg        ),
       .NR_COMMIT_PORTS ( NR_COMMIT_PORTS )
     )i_issue_read_operands  (
         .flush_i             ( flush_unissued_instr_i          ),
@@ -213,7 +222,6 @@ module issue_stage import ariane_pkg::*; #(
         .mult_valid_o        ( mult_valid_o                    ),
         .rs1_forwarding_o    ( rs1_forwarding_xlen             ),
         .rs2_forwarding_o    ( rs2_forwarding_xlen             ),
-        .tinst_o             ( tinst_o                         ),
         .stall_issue_o       ( stall_issue_o                   ),
         .*
     );

@@ -26,7 +26,6 @@ VLIB ?= vlib$(questa_version)
 VMAP ?= vmap$(questa_version)
 # verilator version
 verilator      ?= verilator
-verilator_version = $(shell $(verilator) --version | awk  '{split($$2,v,"."); print v[1]}')
 # traget option
 target-options ?=
 # additional definess
@@ -48,12 +47,9 @@ $(warning must set CVA6_REPO_DIR to point at the root of CVA6 sources -- doing i
 export CVA6_REPO_DIR = $(abspath $(root-dir))
 endif
 
-ifeq ($(verilator_version), 4)
+support_verilator_4 := $(shell ($(verilator) --version | grep '4\.') > /dev/null 2>&1 ; echo $$?)
+ifeq ($(support_verilator_4), 0)
 	verilator_threads := 1
-endif
-
-ifeq ($(verilator_version), 5)
-  verilator_5 := 1
 endif
 
 ifndef RISCV
@@ -89,9 +85,9 @@ ifdef spike-tandem
 endif
 
 # target takes one of the following cva6 hardware configuration:
-# cv64a6_imafdc_sv39, cv32a6_imac_sv0, cv32a6_imac_sv32, cv32a6_imafc_sv32, cv32a6_ima_sv32_fpga, cv64a6_imafdcsclic_sv39
+# cv64a6_imafdc_sv39, cv32a6_imac_sv0, cv32a6_imac_sv32, cv32a6_imafc_sv32, cv32a6_ima_sv32_fpga
 # Changing the default target to cv32a60x for Step1 verification
-target     ?= cv64a6_imafdcsclic_sv39
+target     ?= cv64a6_imadfcv_sv39_polara
 ifndef TARGET_CFG
 	export TARGET_CFG = $(target)
 endif
@@ -102,8 +98,51 @@ ariane_pkg := \
               corev_apu/register_interface/src/reg_intf.sv           \
               corev_apu/tb/ariane_soc_pkg.sv                         \
               corev_apu/riscv-dbg/src/dm_pkg.sv                      \
-              corev_apu/tb/ariane_axi_soc_pkg.sv
+              corev_apu/tb/ariane_axi_soc_pkg.sv		     \
+	      core/include/config_pkg.sv
+
 ariane_pkg := $(addprefix $(root-dir), $(ariane_pkg))
+
+ara_sources := \
+              corev_apu/ara/hardware/src/ara.sv                         \
+              corev_apu/ara/hardware/src/ara_dispatcher.sv              \
+              corev_apu/ara/hardware/src/ara_sequencer.sv               \
+              corev_apu/ara/hardware/src/ctrl_registers.sv              \
+              corev_apu/ara/hardware/src/axi_inval_filter.sv            \
+              corev_apu/ara/hardware/src/vlsu/addrgen.sv                \
+              corev_apu/ara/hardware/src/vlsu/vldu.sv                   \
+              corev_apu/ara/hardware/src/vlsu/vlsu.sv                   \
+              corev_apu/ara/hardware/src/vlsu/vstu.sv                   \
+              corev_apu/ara/hardware/src/sldu/p2_stride_gen.sv          \
+              corev_apu/ara/hardware/src/sldu/sldu.sv                   \
+              corev_apu/ara/hardware/src/sldu/sldu_op_dp.sv             \
+              corev_apu/ara/hardware/src/masku/masku.sv                 \
+              corev_apu/ara/hardware/src/lane/lane.sv                   \
+              corev_apu/ara/hardware/src/lane/fixed_p_rounding.sv       \
+              corev_apu/ara/hardware/src/lane/lane_sequencer.sv         \
+              corev_apu/ara/hardware/src/lane/operand_queue.sv          \
+              corev_apu/ara/hardware/src/lane/operand_queues_stage.sv   \
+              corev_apu/ara/hardware/src/lane/operand_requester.sv      \
+              corev_apu/ara/hardware/src/lane/power_gating_generic.sv   \
+              corev_apu/ara/hardware/src/lane/simd_alu.sv               \
+              corev_apu/ara/hardware/src/lane/simd_div.sv               \
+              corev_apu/ara/hardware/src/lane/simd_mul.sv               \
+              corev_apu/ara/hardware/src/lane/valu.sv                   \
+              corev_apu/ara/hardware/src/lane/vector_fus_stage.sv       \
+              corev_apu/ara/hardware/src/lane/vector_regfile.sv         \
+              corev_apu/ara/hardware/src/lane/vmfpu.sv                  \
+              corev_apu/ara/hardware/include/ara_pkg.sv                 \
+              corev_apu/ara/hardware/include/rvv_pkg.sv                 \
+              vendor/pulp-platform/axi/src/axi_dw_converter.sv          \
+              vendor/pulp-platform/common_cells/src/stream_xbar.sv      \
+              vendor/pulp-platform/tech_cells_generic/src/rtl/tc_sram.sv \
+              vendor/pulp-platform/common_cells/src/fall_through_register.sv \
+	          core/cva6_accel_first_pass_decoder.sv \
+			  vendor/pulp-platform/axi/src/axi_dw_downsizer.sv \
+			  vendor/pulp-platform/common_cells/src/onehot_to_bin.sv \
+			  vendor/pulp-platform/common_cells/src/id_queue.sv
+
+ara_sources := $(addprefix $(root-dir), $(ara_sources))
 
 # Test packages
 test_pkg := $(wildcard tb/test/*/*sequence_pkg.sv*) \
@@ -119,28 +158,26 @@ endif
 
 dpi_hdr := $(wildcard corev_apu/tb/dpi/*.h)
 dpi_hdr := $(addprefix $(root-dir), $(dpi_hdr))
-DPI_FLAGS := -I$(QUESTASIM_HOME)/include                      \
-             -I$(VCS_HOME)/include                            \
-             -I$(RISCV)/include                               \
-             -I$(SPIKE_ROOT)/include                          \
-             -std=c++11 -I../corev_apu/tb/dpi -O3
+CFLAGS += -I$(QUESTASIM_HOME)/include         \
+          -I$(VCS_HOME)/include               \
+          -I$(RISCV)/include                  \
+          -I$(SPIKE_ROOT)/include             \
+          -std=c++17 -I../corev_apu/tb/dpi -O3
 
 ifdef XCELIUM_HOME
-DPI_FLAGS += -I$(XCELIUM_HOME)/tools/include
+CFLAGS += -I$(XCELIUM_HOME)/tools/include
 else
 $(warning XCELIUM_HOME not set which is necessary for compiling DPIs when using XCELIUM)
 endif
 
 ifdef spike-tandem
-DPI_FLAGS += -Itb/riscv-isa-sim/install/include/spike
+    CFLAGS += -Itb/riscv-isa-sim/install/include/spike
 endif
 
-DPI_CFLAGS   ?= $(CFLAGS)   $(DPI_FLAGS)
-DPI_CXXFLAGS ?= $(CXXFLAGS) $(DPI_FLAGS) -D_GLIBCXX_USE_CXX11_ABI=0
 
 # this list contains the standalone components
 src :=  core/include/$(target)_config_pkg.sv                                         \
-        corev_apu/tb/ariane.sv                                                       \
+        corev_apu/src/ariane.sv                                                      \
         $(wildcard corev_apu/bootrom/*.sv)                                           \
         $(wildcard corev_apu/clint/*.sv)                                             \
         $(wildcard corev_apu/fpga/src/axi2apb/src/*.sv)                              \
@@ -150,17 +187,8 @@ src :=  core/include/$(target)_config_pkg.sv                                    
         $(wildcard corev_apu/axi_mem_if/src/*.sv)                                    \
         corev_apu/rv_plic/rtl/rv_plic_target.sv                                      \
         corev_apu/rv_plic/rtl/rv_plic_gateway.sv                                     \
-        corev_apu/rv_plic/rtl/prim_subreg.sv                                         \
         corev_apu/rv_plic/rtl/plic_regmap.sv                                         \
         corev_apu/rv_plic/rtl/plic_top.sv                                            \
-        corev_apu/clic/src/mclic_reg_pkg.sv                                          \
-        corev_apu/clic/src/mclic_reg_top.sv                                          \
-        corev_apu/clic/src/clicint_reg_pkg.sv                                        \
-        corev_apu/clic/src/clicint_reg_top.sv                                        \
-        corev_apu/clic/src/clic_reg_adapter.sv                                       \
-        corev_apu/clic/src/clic_gateway.sv                                           \
-        corev_apu/clic/src/clic_target.sv                                            \
-        corev_apu/clic/src/clic.sv                                                   \
         corev_apu/riscv-dbg/src/dmi_cdc.sv                                           \
         corev_apu/riscv-dbg/src/dmi_jtag.sv                                          \
         corev_apu/riscv-dbg/src/dmi_jtag_tap.sv                                      \
@@ -170,15 +198,11 @@ src :=  core/include/$(target)_config_pkg.sv                                    
         corev_apu/riscv-dbg/src/dm_top.sv                                            \
         corev_apu/riscv-dbg/debug_rom/debug_rom.sv                                   \
         corev_apu/register_interface/src/apb_to_reg.sv                               \
-        corev_apu/register_interface/src/axi_to_reg.sv                               \
-        corev_apu/register_interface/src/reg_demux.sv                                \
-        corev_apu/register_interface/src/reg_err_slv.sv                              \
-        corev_apu/register_interface/src/axi_lite_to_reg.sv                          \
         vendor/pulp-platform/axi/src/axi_multicut.sv                                 \
         vendor/pulp-platform/common_cells/src/rstgen_bypass.sv                       \
         vendor/pulp-platform/common_cells/src/rstgen.sv                              \
         vendor/pulp-platform/common_cells/src/addr_decode.sv                         \
-				vendor/pulp-platform/common_cells/src/stream_register.sv                     \
+	vendor/pulp-platform/common_cells/src/stream_register.sv                     \
         vendor/pulp-platform/axi/src/axi_cut.sv                                      \
         vendor/pulp-platform/axi/src/axi_join.sv                                     \
         vendor/pulp-platform/axi/src/axi_delayer.sv                                  \
@@ -189,10 +213,6 @@ src :=  core/include/$(target)_config_pkg.sv                                    
         vendor/pulp-platform/axi/src/axi_mux.sv                                      \
         vendor/pulp-platform/axi/src/axi_demux.sv                                    \
         vendor/pulp-platform/axi/src/axi_xbar.sv                                     \
-        vendor/pulp-platform/axi/src/axi_burst_splitter.sv                           \
-        vendor/pulp-platform/axi/src/axi_dw_upsizer.sv                               \
-        vendor/pulp-platform/axi/src/axi_dw_downsizer.sv                             \
-        vendor/pulp-platform/axi/src/axi_dw_converter.sv                             \
         vendor/pulp-platform/common_cells/src/cdc_2phase.sv                          \
         vendor/pulp-platform/common_cells/src/spill_register_flushable.sv            \
         vendor/pulp-platform/common_cells/src/spill_register.sv                      \
@@ -200,11 +220,6 @@ src :=  core/include/$(target)_config_pkg.sv                                    
         vendor/pulp-platform/common_cells/src/deprecated/fifo_v2.sv                  \
         vendor/pulp-platform/common_cells/src/stream_delay.sv                        \
         vendor/pulp-platform/common_cells/src/lfsr_16bit.sv                          \
-        vendor/pulp-platform/common_cells/src/onehot_to_bin.sv                       \
-        vendor/pulp-platform/common_cells/src/id_queue.sv                            \
-        vendor/pulp-platform/common_cells/src/stream_fork.sv                         \
-        vendor/pulp-platform/common_cells/src/stream_filter.sv                       \
-        vendor/pulp-platform/common_cells/src/fall_through_register.sv               \
         vendor/pulp-platform/tech_cells_generic/src/deprecated/cluster_clk_cells.sv  \
         vendor/pulp-platform/tech_cells_generic/src/deprecated/pulp_clk_cells.sv     \
         vendor/pulp-platform/tech_cells_generic/src/rtl/tc_clk.sv                    \
@@ -214,14 +229,6 @@ src :=  core/include/$(target)_config_pkg.sv                                    
         corev_apu/tb/common/uart.sv                                                  \
         corev_apu/tb/common/SimDTM.sv                                                \
         corev_apu/tb/common/SimJTAG.sv
-
-flists := ${CVA6_REPO_DIR}/core/Flist.cva6
-# SV32 MMU for CV32, SV39 MMU for CV64
-ifeq ($(findstring 32, $(target)),32)
-    flists += ${CVA6_REPO_DIR}/core/Flist.mmu-sv32
-else
-    flists += ${CVA6_REPO_DIR}/core/Flist.mmu-sv39
-endif
 
 src := $(addprefix $(root-dir), $(src))
 
@@ -241,23 +248,17 @@ tbs := $(addprefix $(root-dir), $(tbs))
 
 # RISCV asm tests and benchmark setup (used for CI)
 # there is a definesd test-list with selected CI tests
-riscv-litmus-test-dir     := tmp/riscv-litmus-tests/binaries/
-riscv-litmus-tests-list   := ci/riscv-litmus-tests.list
 riscv-test-dir            := tmp/riscv-tests/build/isa/
 riscv-benchmarks-dir      := tmp/riscv-tests/build/benchmarks/
-riscv-hyp-test            := tmp/riscv-hyp-tests/build/cva6/rvh_test.elf
 riscv-asm-tests-list      := ci/riscv-asm-tests.list
 riscv-amo-tests-list      := ci/riscv-amo-tests.list
 riscv-mul-tests-list      := ci/riscv-mul-tests.list
 riscv-fp-tests-list       := ci/riscv-fp-tests.list
-riscv-clic-tests-list     := ci/riscv-clic-tests.list
 riscv-benchmarks-list     := ci/riscv-benchmarks.list
-riscv-litmus-tests        := $(shell xargs printf '\n%s' < $(riscv-litmus-tests-list)  | cut -b 1-)
 riscv-asm-tests           := $(shell xargs printf '\n%s' < $(riscv-asm-tests-list)  | cut -b 1-)
 riscv-amo-tests           := $(shell xargs printf '\n%s' < $(riscv-amo-tests-list)  | cut -b 1-)
 riscv-mul-tests           := $(shell xargs printf '\n%s' < $(riscv-mul-tests-list)  | cut -b 1-)
 riscv-fp-tests            := $(shell xargs printf '\n%s' < $(riscv-fp-tests-list)   | cut -b 1-)
-riscv-clic-tests          := $(shell xargs printf '\n%s' < $(riscv-clic-tests-list)   | cut -b 1-)
 riscv-benchmarks          := $(shell xargs printf '\n%s' < $(riscv-benchmarks-list) | cut -b 1-)
 
 # Search here for include files (e.g.: non-standalone components)
@@ -267,7 +268,7 @@ incdir := vendor/pulp-platform/common_cells/include/ vendor/pulp-platform/axi/in
 compile_flag     += +cover=bcfst+/dut -incr -64 -nologo -quiet -suppress 13262 -permissive -svinputport=compat +define+$(defines)
 
 uvm-flags        += +UVM_NO_RELNOTES +UVM_VERBOSITY=LOW
-questa-flags     += -t 1ns -64 -coverage -classdebug $(gui-sim) $(QUESTASIM_FLAGS)
+questa-flags     += -t 1ns -64 -coverage -classdebug $(gui-sim) $(QUESTASIM_FLAGS) +tohost_addr=$(tohost_addr)
 compile_flag_vhd += -64 -nologo -quiet -2008
 
 # Iterate over all include directories and write them with +incdir+ prefixed
@@ -308,7 +309,7 @@ endif
 vcs_build: $(dpi-library)/ariane_dpi.so
 	mkdir -p $(vcs-library)
 	cd $(vcs-library) &&\
-	vlogan $(if $(VERDI), -kdb,) -full64 -nc -sverilog +define+$(defines) -assert svaext $(addprefix -f , ${flists}) &&\
+	vlogan $(if $(VERDI), -kdb,) -full64 -nc -sverilog +define+$(defines) -assert svaext -f ../core/Flist.cva6 &&\
 	vlogan $(if $(VERDI), -kdb,) -full64 -nc -sverilog +define+$(defines) $(filter %.sv,$(ariane_pkg)) +incdir+core/include/+$(VCS_HOME)/etc/uvm-1.2/dpi &&\
 	vhdlan $(if $(VERDI), -kdb,) -full64 -nc $(filter %.vhd,$(uart_src)) &&\
 	vlogan $(if $(VERDI), -kdb,) -full64 -nc -sverilog -assert svaext +define+$(defines) $(filter %.sv,$(src)) +incdir+../vendor/pulp-platform/common_cells/include/+../vendor/pulp-platform/axi/include/+../corev_apu/register_interface/include/ &&\
@@ -326,11 +327,11 @@ build: $(library) $(library)/.build-srcs $(library)/.build-tb $(dpi-library)/ari
 
 # src files
 $(library)/.build-srcs: $(library)
-	$(VLOG) $(compile_flag) -timescale "1ns / 1ns" -work $(library) -pedanticerrors $(addprefix -f , ${flists}) $(list_incdir) -suppress 2583
-	$(VLOG) $(compile_flag) -work $(library) $(filter %.sv,$(ariane_pkg)) $(list_incdir) -suppress 2583
+	$(VLOG) $(compile_flag) -timescale "1ns / 1ns" -work $(library) -pedanticerrors -f core/Flist.cva6 $(list_incdir) -suppress 2583 +defines+$(defines)
+	$(VLOG) $(compile_flag) -work $(library) $(filter %.sv,$(ariane_pkg)) $(list_incdir) -suppress 2583 +defines+$(defines)
 	# Suppress message that always_latch may not be checked thoroughly by QuestaSim.
-	$(VCOM) $(compile_flag_vhd) -work $(library) -pedanticerrors $(filter %.vhd,$(uart_src))
-	$(VLOG) $(compile_flag) -timescale "1ns / 1ns" -work $(library) -pedanticerrors $(filter %.sv,$(src)) $(list_incdir) -suppress 2583
+	$(VCOM) $(compile_flag_vhd) -work $(library) $(filter %.vhd,$(uart_src)) +defines+$(defines)
+	$(VLOG) $(compile_flag) -timescale "1ns / 1ns" -work $(library) -pedanticerrors $(filter %.sv,$(src)) $(tbs) $(list_incdir) -suppress 2583 +defines+$(defines)
 	touch $(library)/.build-srcs
 
 # build TBs
@@ -345,12 +346,12 @@ $(library):
 # compile DPIs
 $(dpi-library)/%.o: corev_apu/tb/dpi/%.cc $(dpi_hdr)
 	mkdir -p $(dpi-library)
-	$(CXX) -shared -fPIC -std=c++0x -Bsymbolic $(DPI_CXXFLAGS) -c $< -o $@
+	$(CXX) -shared -fPIC -Bsymbolic $(CFLAGS) -c $< -o $@
 
 $(dpi-library)/ariane_dpi.so: $(dpi)
 	mkdir -p $(dpi-library)
 	# Compile C-code and generate .so file
-	$(CXX) $(CXXFLAGS) -D_GLIBCXX_USE_CXX11_ABI=0 -shared -m64 -o $(dpi-library)/ariane_dpi.so $? -L$(RISCV)/lib -L$(SPIKE_ROOT)/lib -Wl,-rpath,$(RISCV)/lib -Wl,-rpath,$(SPIKE_ROOT)/lib -lfesvr
+	$(CXX) -shared -m64 -o $(dpi-library)/ariane_dpi.so $? -L$(RISCV)/lib -L$(SPIKE_ROOT)/lib -Wl,-rpath,$(RISCV)/lib -Wl,-rpath,$(SPIKE_ROOT)/lib -lfesvr
 
 # single test runs on Questa can be started by calling make <testname>, e.g. make towers.riscv
 # the test names are defined in ci/riscv-asm-tests.list, and in ci/riscv-benchmarks.list
@@ -361,17 +362,9 @@ generate-trace-vsim:
 	make generate-trace
 
 sim: build
-	$(VSIM) +permissive $(questa-flags) $(questa-cmd) -wlf dump.wlf -lib $(library) +MAX_CYCLES=$(max_cycles) +UVM_TESTNAME=$(test_case) \
+	$(VSIM) +permissive $(questa-flags) $(questa-cmd) -lib $(library) +MAX_CYCLES=$(max_cycles) +UVM_TESTNAME=$(test_case) \
 	+BASEDIR=$(riscv-test-dir) $(uvm-flags) $(QUESTASIM_FLAGS) -gblso $(SPIKE_ROOT)/lib/libfesvr.so -sv_lib $(dpi-library)/ariane_dpi  \
 	${top_level}_optimized +permissive-off ++$(elf-bin) ++$(target-options) | tee sim.log
-
-$(riscv-litmus-tests): $(riscv-litmus-tests-list) build
-	$(VSIM) +permissive $(questa-flags) $(questa-cmd) +define+RVFI_PORT=1 +PRELOAD=$(riscv-litmus-test-dir)/$@ ++$(target-options) -lib $(library) +max-cycles=$(max_cycles) +UVM_TESTNAME=$(test_case) \
-	+BASEDIR=$(riscv-litmus-test-dir) $(uvm-flags) +jtag_rbb_enable=0 +debug_disable +tohost_addr=90000000 -gblso $(SPIKE_ROOT)/lib/libfesvr.so -sv_lib $(dpi-library)/ariane_dpi        \
-	${top_level}_optimized $(QUESTASIM_FLAGS) +permissive-off ++none | tee tmp/riscv-litmus-tests-$@.log
-
-$(riscv-litmus-tests-list):
-	basename -a `find $(riscv-litmus-test-dir) -name "*.elf" | sed 's/\[/\\\[/g'` > $@
 
 $(riscv-asm-tests): build
 	$(VSIM) +permissive $(questa-flags) $(questa-cmd) -lib $(library) +max-cycles=$(max_cycles) +UVM_TESTNAME=$(test_case) \
@@ -393,43 +386,12 @@ $(riscv-fp-tests): build
 	+BASEDIR=$(riscv-test-dir) $(uvm-flags) +jtag_rbb_enable=0  -gblso $(SPIKE_ROOT)/lib/libfesvr.so -sv_lib $(dpi-library)/ariane_dpi        \
 	${top_level}_optimized $(QUESTASIM_FLAGS) +permissive-off ++$(riscv-test-dir)/$@ ++$(target-options) | tee tmp/riscv-fp-tests-$@.log
 
-$(riscv-clic-tests): build
-	$(VSIM) +permissive $(questa-flags) $(questa-cmd) -lib $(library) +max-cycles=$(max_cycles) +UVM_TESTNAME=$(test_case) \
-	+BASEDIR=$(riscv-test-dir) $(uvm-flags) +jtag_rbb_enable=0  -gblso $(SPIKE_ROOT)/lib/libfesvr.so -sv_lib $(dpi-library)/ariane_dpi        \
-	${top_level}_optimized $(QUESTASIM_FLAGS) +permissive-off ++$(riscv-test-dir)/$@ ++$(target-options) | tee tmp/riscv-clic-tests-$@.log
-
-riscv-hyp-test: build
-	$(VSIM) +permissive $(questa-flags) $(questa-cmd) -lib $(library) +max-cycles=$(max_cycles) +UVM_TESTNAME=$(test_case) \
-	+BASEDIR=$(riscv-test-dir) $(uvm-flags) +jtag_rbb_enable=0  -gblso $(SPIKE_ROOT)/lib/libfesvr.so -sv_lib $(dpi-library)/ariane_dpi        \
-	${top_level}_optimized $(QUESTASIM_FLAGS) +permissive-off ++$(riscv-hyp-test) ++$(target-options) | tee tmp/riscv-hyp-tests.log
-
 $(riscv-benchmarks): build
 	$(VSIM) +permissive $(questa-flags) $(questa-cmd) -lib $(library) +max-cycles=$(max_cycles) +UVM_TESTNAME=$(test_case) \
 	+BASEDIR=$(riscv-benchmarks-dir) $(uvm-flags) +jtag_rbb_enable=0 -gblso $(SPIKE_ROOT)/lib/libfesvr.so -sv_lib $(dpi-library)/ariane_dpi   \
 	${top_level}_optimized $(QUESTASIM_FLAGS) +permissive-off ++$(riscv-benchmarks-dir)/$@ ++$(target-options) | tee tmp/riscv-benchmarks-$@.log
 
-tmp/riscv-litmus-tests-%.uart.log: %
-	sed -n 's/^# \[UART\]: \(.*\S\)\s*$$/\1/p' tmp/riscv-litmus-tests-$<.log > $@
-
-tmp/riscv-litmus-tests-%.uart.log-verilator: %
-	sed -n 's/^# \[UART\]: \(.*\S\)\s*$$/\1/p' tmp/riscv-litmus-tests-$<.log > $@
-
-tmp/riscv-litmus-tests-%.litmus.log: tmp/riscv-litmus-tests-%.uart.log
-	echo "Test $(basename $* .elf) Allowed" > $@
-	echo "Histogram" >> $@
-	cat $< >> $@
-	echo "" >> $@
-
 # can use -jX to run ci tests in parallel using X processes
-run-litmus-tests: $(addprefix tmp/riscv-litmus-tests-, $(addsuffix .litmus.log,$(riscv-litmus-tests)))
-	cat $^ > litmus.log
-
-litmus.log:
-	cat tmp/*.litmus.log > $@
-
-check-litmus-tests: litmus.log
-	cd ${riscv-litmus-test-dir}/../ && ! ci/compare_model.sh | grep "Warning negative differences"
-
 run-asm-tests: $(riscv-asm-tests)
 	$(MAKE) check-asm-tests
 
@@ -442,9 +404,6 @@ run-mul-tests: $(riscv-mul-tests)
 run-fp-tests: $(riscv-fp-tests)
 	$(MAKE) check-fp-tests
 
-run-clic-tests: $(riscv-clic-tests)
-	$(MAKE) check-clic-tests
-
 check-asm-tests:
 	ci/check-tests.sh tmp/riscv-asm-tests- $(shell wc -l $(riscv-asm-tests-list) | awk -F " " '{ print $1 }')
 
@@ -456,12 +415,6 @@ check-mul-tests:
 
 check-fp-tests:
 	ci/check-tests.sh tmp/riscv-fp-tests- $(shell wc -l $(riscv-fp-tests-list) | awk -F " " '{ print $1 }')
-
-check-clic-tests:
-	ci/check-tests.sh tmp/riscv-clic-tests- $(shell wc -l $(riscv-clic-tests-list) | awk -F " " '{ print $1 }')
-
-# check-hyp-tests:
-# 	ci/check-tests.sh tmp/riscv-hyp-test $(shell wc -l $(riscv-clic-tests-list) | awk -F " " '{ print $1 }')
 
 # can use -jX to run ci tests in parallel using X processes
 run-benchmarks: $(riscv-benchmarks)
@@ -509,7 +462,7 @@ XRUN_COMP = $(XRUN_COMP_FLAGS)		\
 	$(filter %.sv, $(ariane_pkg)) 	\
 	$(filter %.vhd, $(uart_src))  	\
 	$(filter %.sv, $(src))	      	\
-	$(addprefix -f , ${flists})                 \
+	-f ../core/Flist.cva6    	    \
 	$(filter %.sv, $(XRUN_TB))	\
 
 XRUN_RUN = $(XRUN_RUN_FLAGS) 		\
@@ -569,12 +522,6 @@ $(addprefix xrun_, $(riscv-fp-tests)): xrun_comp
 	$(XRUN)	+permissive $(XRUN_RUN) +MAX_CYCLES=$(max_cycles) +UVM_TESTNAME=$(test_case) 	\
 	-l isa/fp/$(notdir $@).log +permissive-off ++$(CVA6_HOME)/$(riscv-test-dir)/$(patsubst xrun_%,%,$@)
 
-$(addprefix xrun_, $(riscv-clic-tests)): xrun_comp
-	cd $(XRUN_RESULTS_DIR); 								\
-	mkdir -p isa/clic/;									\
-	$(XRUN)	+permissive $(XRUN_RUN) +MAX_CYCLES=$(max_cycles) +UVM_TESTNAME=$(test_case) 	\
-	-l isa/clic/$(notdir $@).log +permissive-off ++$(CVA6_HOME)/$(riscv-test-dir)/$(patsubst xrun_%,%,$@)
-
 $(addprefix xrun_, $(riscv-benchmarks)): xrun_comp
 	cd $(XRUN_RESULTS_DIR);									\
 	mkdir -p benchmarks/;									\
@@ -594,9 +541,6 @@ xrun-mul-tests: $(addprefix xrun_, $(riscv-mul-tests))
 xrun-fp-tests: $(addprefix xrun_, $(riscv-fp-tests))
 	$(MAKE) xrun-check-fp-tests
 
-xrun-clic-tests: $(addprefix xrun_, $(riscv-clic-tests))
-	$(MAKE) xrun-check-clic-tests
-
 xrun-check-asm-tests:
 	ci/check-tests.sh $(XRUN_RESULTS_DIR)/isa/asm/ $(shell wc -l $(riscv-asm-tests-list) | awk -F " " '{ print $1 }')
 
@@ -609,8 +553,6 @@ xrun-check-mul-tests:
 xrun-check-fp-tests:
 	ci/check-tests.sh $(XRUN_RESULTS_DIR)/isa/fp/ $(shell wc -l $(riscv-fp-tests-list) | awk -F " " '{ print $1 }')
 
-xrun-check-clic-tests:
-	ci/check-tests.sh $(XRUN_RESULTS_DIR)/isa/clic/ $(shell wc -l $(riscv-clic-tests-list) | awk -F " " '{ print $1 }')
 
 # can use -jX to run ci tests in parallel using X processes
 xrun-benchmarks: $(addprefix xrun_, $(riscv-benchmarks))
@@ -624,7 +566,7 @@ xrun-ci: xrun-asm-tests xrun-amo-tests xrun-mul-tests xrun-fp-tests xrun-benchma
 
 # verilator-specific
 verilate_command := $(verilator) verilator_config.vlt                                                            \
-                    $(addprefix -f , ${flists})                                                                  \
+                    -f core/Flist.cva6                                                                           \
                     $(filter-out %.vhd, $(ariane_pkg))                                                           \
                     $(filter-out core/fpu_wrap.sv, $(filter-out %.vhd, $(src)))                                  \
                     +define+$(defines)$(if $(TRACE_FAST),+VM_TRACE)$(if $(TRACE_COMPACT),+VM_TRACE+VM_TRACE_FST) \
@@ -643,14 +585,13 @@ verilate_command := $(verilator) verilator_config.vlt                           
                     -Wno-UNOPTFLAT                                                                               \
                     -Wno-BLKANDNBLK                                                                              \
                     -Wno-style                                                                                   \
-                    $(if $(verilator_5),--no-timing)                                                             \
                     $(if ($(PRELOAD)!=""), -DPRELOAD=1,)                                                         \
                     $(if $(PROFILE),--stats --stats-vars --profile-cfuncs,)                                      \
                     $(if $(DEBUG), --trace-structs,)                                                             \
                     $(if $(TRACE_COMPACT), --trace-fst $(VERILATOR_ROOT)/include/verilated_fst_c.cpp)            \
                     $(if $(TRACE_FAST), --trace $(VERILATOR_ROOT)/include/verilated_vcd_c.cpp,)                  \
                     -LDFLAGS "-L$(RISCV)/lib -L$(SPIKE_ROOT)/lib -Wl,-rpath,$(RISCV)/lib -Wl,-rpath,$(SPIKE_ROOT)/lib -lfesvr$(if $(PROFILE), -g -pg,) -lpthread $(if $(TRACE_COMPACT), -lz,)" \
-                    -CFLAGS "$(DPI_CFLAGS)$(if $(PROFILE), -g -pg,) -DVL_DEBUG"                                  \
+                    -CFLAGS "$(CFLAGS)$(if $(PROFILE), -g -pg,) -DVL_DEBUG"                                      \
                     --cc  --vpi                                                                                  \
                     $(list_incdir) --top-module ariane_testharness                                               \
                     --threads-dpi none                                                                           \
@@ -680,20 +621,6 @@ $(addsuffix -verilator,$(riscv-mul-tests)): verilate
 $(addsuffix -verilator,$(riscv-fp-tests)): verilate
 	$(ver-library)/Variane_testharness $(riscv-test-dir)/$(subst -verilator,,$@)
 
-$(addsuffix -verilator,$(riscv-clic-tests)): verilate
-	$(ver-library)/Variane_testharness $(riscv-test-dir)/$(subst -verilator,,$@)
-
-riscv-hyp-test-verilator: verilate
-	$(ver-library)/Variane_testharness $(riscv-hyp-test)
-
-$(addsuffix -verilator,$(riscv-litmus-tests)): verilate
-	$(ver-library)/Variane_testharness $(riscv-litmus-test-dir)/$(subst -verilator,,$@) +debug_disable +tohost_addr=90000000 > tmp/$@.log
-	sed -rn '/^[0-9]+:>/,/Time/p' < tmp/$@.log > tmp/$@.uart.log
-	echo "Test $(subst .elf-verilator,,$@) Allowed" > tmp/$(subst -verilator,,$@).litmus.log
-	echo "Histogram" >> tmp/$(subst -verilator,,$@).litmus.log
-	cat tmp/$@.uart.log >> tmp/$(subst -verilator,,$@).litmus.log
-	echo "" >> tmp/$(subst -verilator,,$@).litmus.log
-
 $(addsuffix -verilator,$(riscv-benchmarks)): verilate
 	$(ver-library)/Variane_testharness $(riscv-benchmarks-dir)/$(subst -verilator,,$@)
 
@@ -710,12 +637,6 @@ run-fp-verilator: $(addsuffix -verilator, $(riscv-fp-tests))
 run-fp-d-verilator: $(addsuffix -verilator, $(filter rv64ud%, $(riscv-fp-tests)))
 
 run-fp-f-verilator: $(addsuffix -verilator, $(filter rv64uf%, $(riscv-fp-tests)))
-
-run-clic-verilator: $(addsuffix -verilator, $(riscv-clic-tests))
-
-run-hyp-verilator: riscv-hyp-test-verilator
-
-run-litmus-tests-verilator: $(addsuffix -verilator, $(riscv-litmus-tests))
 
 run-benchmarks-verilator: $(addsuffix -verilator,$(riscv-benchmarks))
 
@@ -765,7 +686,7 @@ check-torture:
 	grep 'All signatures match for $(test-location)' $(riscv-torture-dir)/$(test-location).log
 	diff -s $(riscv-torture-dir)/$(test-location).spike.sig $(riscv-torture-dir)/$(test-location).rtlsim.sig
 
-src_flist := $(addprefix $(root-dir), $(foreach flist, ${flists}, $(shell cat ${flist} | grep "$\{CVA6_REPO_DIR.\+sv" | sed "s/.*CVA6_REPO_DIR..//" | sed "s/..TARGET_CFG./$(target)/")))
+src_flist := $(addprefix $(root-dir), $(shell cat core/Flist.cva6|grep "$\{CVA6_REPO_DIR.\+sv"|sed "s/.*CVA6_REPO_DIR..//"|sed "s/..TARGET_CFG./$(target)/"))
 fpga_filter := $(addprefix $(root-dir), corev_apu/bootrom/bootrom.sv)
 fpga_filter += $(addprefix $(root-dir), core/include/instr_tracer_pkg.sv)
 fpga_filter += $(addprefix $(root-dir), src/util/ex_trace_item.sv)
@@ -782,6 +703,7 @@ fpga: $(ariane_pkg) $(src) $(fpga_src) $(uart_src) $(src_flist)
 	@echo read_verilog -sv {$(filter-out $(fpga_filter), $(src_flist))}		>> corev_apu/fpga/scripts/add_sources.tcl
 	@echo read_verilog -sv {$(filter-out $(fpga_filter), $(src))} 	   >> corev_apu/fpga/scripts/add_sources.tcl
 	@echo read_verilog -sv {$(fpga_src)}   >> corev_apu/fpga/scripts/add_sources.tcl
+	@echo read_verilog -sv {$(ara_sources)} > corev_apu/fpga/scripts/ara_sources.tcl
 	@echo "[FPGA] Generate Bitstream"
 	cd corev_apu/fpga && make BOARD=$(BOARD) XILINX_PART=$(XILINX_PART) XILINX_BOARD=$(XILINX_BOARD) CLK_PERIOD_NS=$(CLK_PERIOD_NS)
 
@@ -791,7 +713,6 @@ build-spike:
 	cd tb/riscv-isa-sim && mkdir -p build && cd build && ../configure --prefix=`pwd`/../install --with-fesvr=$(RISCV) --enable-commitlog && make -j8 install
 
 clean:
-	rm -rf log/*
 	rm -rf $(riscv-torture-dir)/output/test*
 	rm -rf $(library)/ $(dpi-library)/ $(ver-library)/ $(vcs-library)/
 	rm -f tmp/*.ucdb tmp/*.log *.wlf *vstf wlft* *.ucdb

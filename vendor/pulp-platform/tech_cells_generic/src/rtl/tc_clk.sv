@@ -61,16 +61,6 @@ module tc_clk_inverter (
 
 endmodule
 
-// Warning: Typical clock mux cells of a technologies std cell library ARE NOT
-// GLITCH FREE!! The only difference to a regular multiplexer cell is that they
-// feature balanced rise- and fall-times. In other words: SWITCHING FROM ONE
-// CLOCK TO THE OTHER CAN INTRODUCE GLITCHES. ALSO, GLITCHES ON THE SELECT LINE
-// DIRECTLY TRANSLATE TO GLITCHES ON THE OUTPUT CLOCK!! This cell is only
-// intended to be used for quasi-static switching between clocks when one of the
-// clocks is anyway inactive or if the downstream logic remains gated or in
-// reset state during the transition phase. If you need dynamic switching
-// between arbitrary input clocks without introducing glitches, have a look at
-// the clk_mux_glitch_free cell in the pulp-platform/common_cells repository.
 module tc_clk_mux2 (
   input  logic clk0_i,
   input  logic clk1_i,
@@ -92,16 +82,6 @@ module tc_clk_xor2 (
 
 endmodule
 
-module tc_clk_or2 (
-  input logic clk0_i,
-  input logic clk1_i,
-  output logic clk_o
-);
-
-  assign clk_o = clk0_i | clk1_i;
-
-endmodule
-
 `ifndef SYNTHESIS
 module tc_clk_delay #(
   parameter int unsigned Delay = 300ps
@@ -118,3 +98,5 @@ module tc_clk_delay #(
 
 endmodule
 `endif
+
+

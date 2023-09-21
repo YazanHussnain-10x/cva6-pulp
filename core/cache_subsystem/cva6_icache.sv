@@ -26,6 +26,7 @@
 
 
 module cva6_icache import ariane_pkg::*; import wt_cache_pkg::*; #(
+  parameter ariane_pkg::cva6_cfg_t cva6_cfg = ariane_pkg::cva6_cfg_empty,
   parameter logic [MEM_TID_WIDTH-1:0]   RdTxId             = 0,                                  // ID to be used for read transactions
   parameter ariane_pkg::ariane_cfg_t    ArianeCfg          = ariane_pkg::ArianeDefaultConfig     // contains cacheable regions
 ) (
@@ -35,9 +36,6 @@ module cva6_icache import ariane_pkg::*; import wt_cache_pkg::*; #(
   input  logic                      flush_i,              // flush the icache, flush and kill have to be asserted together
   input  logic                      en_i,                 // enable icache
   output logic                      miss_o,               // to performance counter
-  output logic                      busy_o,
-  input  logic                      stall_i,
-  input  logic                      init_ni,              // do not init after enabling
   // address translation requests
   input  icache_areq_i_t            areq_i,
   output icache_areq_o_t            areq_o,
@@ -51,6 +49,16 @@ module cva6_icache import ariane_pkg::*; import wt_cache_pkg::*; #(
   input  logic                      mem_data_ack_i,
   output icache_req_t               mem_data_o
 );
+
+  // functions
+  function automatic logic [ariane_pkg::ICACHE_SET_ASSOC-1:0] icache_way_bin2oh (
+    input logic [L1I_WAY_WIDTH-1:0] in
+  );
+    logic [ariane_pkg::ICACHE_SET_ASSOC-1:0] out;
+    out     = '0;
+    out[in] = 1'b1;
+    return out;
+  endfunction
 
   // signals
   logic                                 cache_en_d, cache_en_q;       // cache is enabled
@@ -96,8 +104,6 @@ module cva6_icache import ariane_pkg::*; import wt_cache_pkg::*; #(
   // cpmtroller FSM
   typedef enum logic[2:0] {FLUSH, IDLE, READ, MISS, KILL_ATRANS, KILL_MISS} state_e;
   state_e state_d, state_q;
-
-  assign busy_o = (state_q != IDLE);
 
 ///////////////////////////////////////////////////////
 // address -> cl_index mapping, interface plumbing
@@ -159,7 +165,7 @@ end else begin : gen_piton_offset
   always_comb begin : p_fsm
     // default assignment
     state_d      = state_q;
-    cache_en_d   = (cache_en_q | init_ni) & en_i;// disabling the cache is always possible, enable needs to go via flush if we init
+    cache_en_d   = cache_en_q & en_i;// disabling the cache is always possible, enable needs to go via flush
     flush_en     = 1'b0;
     cmp_en_d     = 1'b0;
     cache_rden   = 1'b0;
@@ -203,11 +209,10 @@ end else begin : gen_piton_offset
           cmp_en_d = cache_en_q;
 
           // handle pending flushes, or perform cache clear upon enable
-          if (flush_d || (en_i && !cache_en_q && !init_ni)) begin
+          if (flush_d || (en_i && !cache_en_q)) begin
             state_d    = FLUSH;
           // wait for incoming requests
-          end
-          else if (!stall_i) begin
+          end else begin
             // mem requests are for sure invals here
             if (!mem_rtrn_vld_i) begin
               dreq_o.ready = 1'b1;

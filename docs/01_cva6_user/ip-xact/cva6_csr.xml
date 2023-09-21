@@ -1153,6 +1153,23 @@ To select MODE=Bare, software must write zero to the remaining fields of ``satp`
                                                 <ipxact:access>read-only</ipxact:access>
                                         </ipxact:field>
                                         <ipxact:field>
+                                                <ipxact:name>WPRI3</ipxact:name>
+                                                <ipxact:displayName>Reserved Writes Preserve Values, Reads Ignore Value</ipxact:displayName>
+                                                <ipxact:description>Reserved Writes Preserve Values, Reads Ignore Value</ipxact:description>
+                                                <ipxact:bitOffset>23</ipxact:bitOffset>
+                                                <ipxact:resets>
+                                                        <ipxact:reset>
+                                                                <ipxact:value>0x0</ipxact:value>
+                                                                <ipxact:mask>0x1</ipxact:mask>
+                                                        </ipxact:reset>
+                                                </ipxact:resets>
+                                                <ipxact:bitWidth>8</ipxact:bitWidth>
+                                                <ipxact:access>read-write</ipxact:access>
+                                                <ipxact:vendorExtensions>
+                                                        <RISCV_behavior>WPRI</RISCV_behavior>
+                                                </ipxact:vendorExtensions>
+                                        </ipxact:field>
+                                        <ipxact:field>
                                                 <ipxact:name>TSR</ipxact:name>
                                                 <ipxact:displayName>Trap SRET</ipxact:displayName>
                                                 <ipxact:description>The TSR bit supports intercepting the supervisor exception return instruction, SRET. When TSR=1, attempts to execute SRET while executing in S-mode will raise an illegal instruction exception. When TSR=0, this operation is permitted in S-mode.</ipxact:description>
@@ -1378,8 +1395,9 @@ This field can be checked by a context switch routine to quickly determine wheth
                                                 <ipxact:access>read-write</ipxact:access>
                                         </ipxact:field>
                                         <ipxact:field>
-                                                <ipxact:name>UPIE</ipxact:name>
-                                                <ipxact:description>indicates whether user-level interrupts were enabled prior to taking a user-level trap</ipxact:description>
+                                                <ipxact:name>WPRI2</ipxact:name>
+                                                <ipxact:displayName>Reserved Writes Preserve Values, Reads Ignore Value</ipxact:displayName>
+                                                <ipxact:description>Reserved Writes Preserve Values, Reads Ignore Value</ipxact:description>
                                                 <ipxact:bitOffset>4</ipxact:bitOffset>
                                                 <ipxact:resets>
                                                         <ipxact:reset>
@@ -1389,6 +1407,9 @@ This field can be checked by a context switch routine to quickly determine wheth
                                                 </ipxact:resets>
                                                 <ipxact:bitWidth>1</ipxact:bitWidth>
                                                 <ipxact:access>read-write</ipxact:access>
+                                                <ipxact:vendorExtensions>
+                                                        <RISCV_behavior>WPRI</RISCV_behavior>
+                                                </ipxact:vendorExtensions>
                                         </ipxact:field>
                                         <ipxact:field>
                                                 <ipxact:name>MIE</ipxact:name>
@@ -1405,6 +1426,23 @@ This field can be checked by a context switch routine to quickly determine wheth
                                                 <ipxact:access>read-write</ipxact:access>
                                         </ipxact:field>
                                         <ipxact:field>
+                                                <ipxact:name>WPRI1</ipxact:name>
+                                                <ipxact:displayName>Reserved Writes Preserve Values, Reads Ignore Value</ipxact:displayName>
+                                                <ipxact:description>Reserved Writes Preserve Values, Reads Ignore Value</ipxact:description>
+                                                <ipxact:bitOffset>2</ipxact:bitOffset>
+                                                <ipxact:resets>
+                                                        <ipxact:reset>
+                                                                <ipxact:value>0x0</ipxact:value>
+                                                                <ipxact:mask>0x1</ipxact:mask>
+                                                        </ipxact:reset>
+                                                </ipxact:resets>
+                                                <ipxact:bitWidth>1</ipxact:bitWidth>
+                                                <ipxact:access>read-write</ipxact:access>
+                                                <ipxact:vendorExtensions>
+                                                        <RISCV_behavior>WPRI</RISCV_behavior>
+                                                </ipxact:vendorExtensions>
+                                        </ipxact:field>
+                                        <ipxact:field>
                                                 <ipxact:name>SIE</ipxact:name>
                                                 <ipxact:displayName>Supervisor mode Interrupt Enable</ipxact:displayName>
                                                 <ipxact:description>Global interrupt-enable bit for Supervisor mode.</ipxact:description>
@@ -1419,8 +1457,9 @@ This field can be checked by a context switch routine to quickly determine wheth
                                                 <ipxact:access>read-write</ipxact:access>
                                         </ipxact:field>
                                         <ipxact:field>
-                                                <ipxact:name>UIE</ipxact:name>
-                                                <ipxact:description>Global interrupt-enable bits</ipxact:description>
+                                                <ipxact:name>WPRI0</ipxact:name>
+                                                <ipxact:displayName>Reserved Writes Preserve Values, Reads Ignore Value</ipxact:displayName>
+                                                <ipxact:description>Reserved Writes Preserve Values, Reads Ignore Value</ipxact:description>
                                                 <ipxact:bitOffset>0</ipxact:bitOffset>
                                                 <ipxact:resets>
                                                         <ipxact:reset>
@@ -1430,6 +1469,9 @@ This field can be checked by a context switch routine to quickly determine wheth
                                                 </ipxact:resets>
                                                 <ipxact:bitWidth>1</ipxact:bitWidth>
                                                 <ipxact:access>read-write</ipxact:access>
+                                                <ipxact:vendorExtensions>
+                                                        <RISCV_behavior>WPRI</RISCV_behavior>
+                                                </ipxact:vendorExtensions>
                                         </ipxact:field>
                                         <ipxact:vendorExtensions>
                                                 <privilege_mode>M</privilege_mode>
@@ -2004,14 +2046,14 @@ with the index of the bit position equal to the value returned in the ``mcause``
                                 <ipxact:register>
                                         <ipxact:name>mscratch</ipxact:name>
                                         <ipxact:displayName>Machine Scratch</ipxact:displayName>
-                                        <ipxact:description>This register is used to hold a pointer to a machine-mode hart-local context space and swapped with a user register upon entry to an M-mode trap handler.</ipxact:description>
+                                        <ipxact:description>This register is used to hold a value dedicated to Machine mode. Attempts to access without Machine mode level raise illegal instruction exception.</ipxact:description>
                                         <ipxact:addressOffset>'h340</ipxact:addressOffset>
                                         <ipxact:size>32</ipxact:size>
                                         <ipxact:access>read-write</ipxact:access>
                                         <ipxact:field>
                                                 <ipxact:name>mscratch</ipxact:name>
                                                 <ipxact:displayName>Machine Scratch</ipxact:displayName>
-                                                <ipxact:description>Holds a pointer to a machine-mode hart-local context space and swapped with a user register upon entry to an M-mode trap handler.</ipxact:description>
+                                                <ipxact:description>Holds a value dedicated to Machine mode.</ipxact:description>
                                                 <ipxact:bitOffset>0</ipxact:bitOffset>
                                                 <ipxact:resets>
                                                         <ipxact:reset>
@@ -2598,7 +2640,7 @@ If ``mtval`` is written with a nonzero value when an instruction access-fault or
                                         <ipxact:name>icache</ipxact:name>
                                         <ipxact:displayName>Instuction Cache</ipxact:displayName>
                                         <ipxact:description>Custom Register to enable/disable for Icache [bit 0]</ipxact:description>
-                                        <ipxact:addressOffset>'h700</ipxact:addressOffset>
+                                        <ipxact:addressOffset>'h7C0</ipxact:addressOffset>
                                         <ipxact:size>32</ipxact:size>
                                         <ipxact:access>read-write</ipxact:access>
                                         <ipxact:field>
@@ -2623,7 +2665,7 @@ If ``mtval`` is written with a nonzero value when an instruction access-fault or
                                         <ipxact:name>dcache</ipxact:name>
                                         <ipxact:displayName>Data Cache</ipxact:displayName>
                                         <ipxact:description>Custom Register to enable/disable for Dcache [bit 0]</ipxact:description>
-                                        <ipxact:addressOffset>'h701</ipxact:addressOffset>
+                                        <ipxact:addressOffset>'h7C1</ipxact:addressOffset>
                                         <ipxact:size>32</ipxact:size>
                                         <ipxact:access>read-write</ipxact:access>
                                         <ipxact:field>

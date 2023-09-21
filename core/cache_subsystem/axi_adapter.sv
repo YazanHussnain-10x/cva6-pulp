@@ -17,6 +17,7 @@
 //import std_cache_pkg::*;
 
 module axi_adapter #(
+  parameter ariane_pkg::cva6_cfg_t cva6_cfg = ariane_pkg::cva6_cfg_empty,
   parameter int unsigned DATA_WIDTH            = 256,
   parameter logic        CRITICAL_WORD_FIRST   = 0, // the AXI subsystem needs to support wrapping reads for this feature
   parameter int unsigned CACHELINE_BYTE_OFFSET = 8,
@@ -29,7 +30,6 @@ module axi_adapter #(
   input  logic                             clk_i,  // Clock
   input  logic                             rst_ni, // Asynchronous reset active low
 
-  output logic                             busy_o,
   input  logic                             req_i,
   input  ariane_axi::ad_req_t              type_i,
   input  ariane_pkg::amo_t                 amo_i,
@@ -69,9 +69,6 @@ module axi_adapter #(
   // save the atomic operation and size
   ariane_pkg::amo_t amo_d, amo_q;
   logic [1:0] size_d, size_q;
-
-  // Busy if we're not idle
-  assign busy_o = state_q != IDLE;
 
   always_comb begin : axi_fsm
     // Default assignments
@@ -173,14 +170,14 @@ module axi_adapter #(
               assert (amo_i == ariane_pkg::AMO_NONE)
                 else $fatal("Bursts of atomic operations are not supported");
 
-              axi_req_o.aw.len = BURST_SIZE; // number of bursts to do
+              axi_req_o.aw.len = BURST_SIZE[7:0]; // number of bursts to do
               axi_req_o.w.data = wdata_i[0];
               axi_req_o.w.strb = be_i[0];
 
               if (axi_resp_i.w_ready)
-                cnt_d = BURST_SIZE - 1;
+                cnt_d = BURST_SIZE[ADDR_INDEX-1:0] - 1;
               else
-                cnt_d = BURST_SIZE;
+                cnt_d = BURST_SIZE[ADDR_INDEX-1:0];
 
               case ({axi_resp_i.aw_ready, axi_resp_i.w_ready})
                 2'b11: state_d = WAIT_LAST_W_READY;
@@ -201,8 +198,8 @@ module axi_adapter #(
               assert (amo_i == ariane_pkg::AMO_NONE)
                 else $fatal("Bursts of atomic operations are not supported");
 
-              axi_req_o.ar.len = BURST_SIZE;
-              cnt_d = BURST_SIZE;
+              axi_req_o.ar.len = BURST_SIZE[7:0];
+              cnt_d = BURST_SIZE[ADDR_INDEX-1:0];
             end
 
             if (axi_resp_i.ar_ready) begin
@@ -233,12 +230,12 @@ module axi_adapter #(
           axi_req_o.w.data = wdata_i[0];
           axi_req_o.w.strb = be_i[0];
         end else begin
-          axi_req_o.w.data = wdata_i[BURST_SIZE-cnt_q];
-          axi_req_o.w.strb = be_i[BURST_SIZE-cnt_q];
+          axi_req_o.w.data = wdata_i[BURST_SIZE[ADDR_INDEX-1:0]-cnt_q];
+          axi_req_o.w.strb = be_i[BURST_SIZE[ADDR_INDEX-1:0]-cnt_q];
         end
         axi_req_o.aw_valid = 1'b1;
         // we are here because we want to write a cache line
-        axi_req_o.aw.len   = BURST_SIZE;
+        axi_req_o.aw.len   = BURST_SIZE[7:0];
         // we got an aw_ready
         case ({axi_resp_i.aw_ready, axi_resp_i.w_ready})
           // we got an aw ready
@@ -269,7 +266,7 @@ module axi_adapter #(
       // ~> all data has already been sent, we are only waiting for the aw_ready
       WAIT_AW_READY_BURST: begin
         axi_req_o.aw_valid = 1'b1;
-        axi_req_o.aw.len   = BURST_SIZE;
+        axi_req_o.aw.len   = BURST_SIZE[7:0];
 
         if (axi_resp_i.aw_ready) begin
           state_d  = WAIT_B_VALID;
@@ -282,8 +279,8 @@ module axi_adapter #(
         axi_req_o.w_valid = 1'b1;
 
         if (type_i != ariane_axi::SINGLE_REQ) begin
-          axi_req_o.w.data = wdata_i[BURST_SIZE-cnt_q];
-          axi_req_o.w.strb = be_i[BURST_SIZE-cnt_q];
+          axi_req_o.w.data = wdata_i[BURST_SIZE[ADDR_INDEX-1:0]-cnt_q];
+          axi_req_o.w.strb = be_i[BURST_SIZE[ADDR_INDEX-1:0]-cnt_q];
         end
 
         // this is the last write
@@ -354,9 +351,9 @@ module axi_adapter #(
       // ~> cacheline read, single read
       WAIT_R_VALID_MULTIPLE, WAIT_R_VALID: begin
         if (CRITICAL_WORD_FIRST)
-          index = addr_offset_q + (BURST_SIZE-cnt_q);
+          index = addr_offset_q + (BURST_SIZE[ADDR_INDEX-1:0]-cnt_q);
         else
-          index = BURST_SIZE-cnt_q;
+          index = BURST_SIZE[ADDR_INDEX-1:0]-cnt_q;
 
         // reads are always wrapping here
         axi_req_o.r_ready = 1'b1;

@@ -16,6 +16,7 @@
 // change request from the back-end and does branch prediction.
 
 module frontend import ariane_pkg::*; #(
+  parameter ariane_pkg::cva6_cfg_t cva6_cfg = ariane_pkg::cva6_cfg_empty,
   parameter ariane_pkg::ariane_cfg_t ArianeCfg = ariane_pkg::ArianeDefaultConfig
 ) (
   input  logic               clk_i,              // Clock
@@ -50,9 +51,6 @@ module frontend import ariane_pkg::*; #(
     logic                   icache_valid_q;
     ariane_pkg::frontend_exception_t icache_ex_valid_q;
     logic [riscv::VLEN-1:0] icache_vaddr_q;
-    logic [riscv::GPLEN-1:0]icache_gpaddr_q;
-    logic [riscv::XLEN-1:0] icache_tinst_q;
-    logic                   icache_gva_q;
     logic                   instr_queue_ready;
     logic [ariane_pkg::INSTR_PER_FETCH-1:0] instr_queue_consumed;
     // upper-most branch-prediction from last cycle
@@ -113,7 +111,9 @@ module frontend import ariane_pkg::*; #(
 
     logic serving_unaligned;
     // Re-align instructions
-    instr_realign i_instr_realign (
+    instr_realign #(
+      .cva6_cfg   ( cva6_cfg   )
+    ) i_instr_realign (
       .clk_i               ( clk_i                 ),
       .rst_ni              ( rst_ni                ),
       .flush_i             ( icache_dreq_o.kill_s2 ),
@@ -363,9 +363,6 @@ module frontend import ariane_pkg::*; #(
         icache_data_q     <= '0;
         icache_valid_q    <= 1'b0;
         icache_vaddr_q    <= 'b0;
-        icache_gpaddr_q   <= 'b0;
-        icache_tinst_q    <= 'b0;
-        icache_gva_q      <= 1'b0;
         icache_ex_valid_q <= ariane_pkg::FE_NONE;
         btb_q             <= '0;
         bht_q             <= '0;
@@ -377,14 +374,8 @@ module frontend import ariane_pkg::*; #(
         if (icache_dreq_i.valid) begin
           icache_data_q        <= icache_data;
           icache_vaddr_q       <= icache_dreq_i.vaddr;
-          icache_gpaddr_q      <= icache_dreq_i.ex.tval2[riscv::GPLEN-1:0];
-          icache_tinst_q       <= icache_dreq_i.ex.tinst;
-          icache_gva_q         <= icache_dreq_i.ex.gva;
-
           // Map the only three exceptions which can occur in the frontend to a two bit enum
-          if(icache_dreq_i.ex.cause == riscv::INSTR_GUEST_PAGE_FAULT) begin
-            icache_ex_valid_q <= ariane_pkg::FE_INSTR_GUEST_PAGE_FAULT;
-          end else if (icache_dreq_i.ex.cause == riscv::INSTR_PAGE_FAULT) begin
+          if (icache_dreq_i.ex.cause == riscv::INSTR_PAGE_FAULT) begin
             icache_ex_valid_q <= ariane_pkg::FE_INSTR_PAGE_FAULT;
           end else if (icache_dreq_i.ex.cause == riscv::INSTR_ACCESS_FAULT) begin
             icache_ex_valid_q <= ariane_pkg::FE_INSTR_ACCESS_FAULT;
@@ -480,9 +471,6 @@ module frontend import ariane_pkg::*; #(
       .addr_i              ( addr                 ), // from re-aligner
       .exception_i         ( icache_ex_valid_q    ), // from I$
       .exception_addr_i    ( icache_vaddr_q       ),
-      .exception_gpaddr_i  ( icache_gpaddr_q      ),
-      .exception_tinst_i   ( icache_tinst_q       ),
-      .exception_gva_i     ( icache_gva_q         ),
       .predict_address_i   ( predict_address      ),
       .cf_type_i           ( cf_type              ),
       .valid_i             ( instruction_valid    ), // from re-aligner

@@ -14,6 +14,7 @@
 
 
 module perf_counters import ariane_pkg::*; #(
+    parameter ariane_pkg::cva6_cfg_t cva6_cfg = ariane_pkg::cva6_cfg_empty,
   parameter int unsigned                NumPorts      = 3    // number of miss ports
 ) (
   input  logic                                    clk_i,
@@ -47,7 +48,8 @@ module perf_counters import ariane_pkg::*; #(
   input  dcache_req_i_t[2:0]                      l1_dcache_access_i,
   input  logic [NumPorts-1:0][DCACHE_SET_ASSOC-1:0]miss_vld_bits_i,  //For Cache eviction (3ports-LOAD,STORE,PTW)
   input  logic                                    i_tlb_flush_i,
-  input  logic                                    stall_issue_i  //stall-read operands
+  input  logic                                    stall_issue_i,  //stall-read operands
+  input  logic[31:0]                              mcountinhibit_i
 );
 
   logic [63:0] generic_counter_d[6:1];
@@ -102,12 +104,12 @@ module perf_counters import ariane_pkg::*; #(
         generic_counter_d = generic_counter_q;
         data_o = 'b0;
         mhpmevent_d = mhpmevent_q;
-	    read_access_exception =  1'b0;
-	    update_access_exception =  1'b0;
+        read_access_exception =  1'b0;
+        update_access_exception =  1'b0;
 
       for(int unsigned i = 1; i <= 6; i++) begin
          if ((!debug_mode_i) && (!we_i)) begin
-             if (events[i] == 1)begin
+             if ((events[i]) == 1 && (!mcountinhibit_i[i+2]))begin
                 generic_counter_d[i] = generic_counter_q[i] + 1'b1;end
             else begin
                 generic_counter_d[i] = 'b0;end

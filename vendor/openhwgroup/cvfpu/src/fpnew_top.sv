@@ -17,13 +17,9 @@ module fpnew_top #(
   // FPU configuration
   parameter fpnew_pkg::fpu_features_t       Features       = fpnew_pkg::RV64D_Xsflt,
   parameter fpnew_pkg::fpu_implementation_t Implementation = fpnew_pkg::DEFAULT_NOREGS,
-  // PulpDivSqrt = 0 enables T-head-based DivSqrt unit. Supported only for FP32-only instances of Fpnew
-  parameter logic                           PulpDivsqrt    = 1'b1,
   parameter type                            TagType        = logic,
-  parameter logic                           TrueSIMDClass  = 1'b0,
-  parameter logic                           EnableSIMDMask = 1'b0,
-  parameter logic                           CompressedVecCmpResult = 1'b0, // conceived for RV32FD cores
-  parameter fpnew_pkg::rsr_impl_t           StochasticRndImplementation = fpnew_pkg::DEFAULT_NO_RSR,
+  parameter int unsigned                    TrueSIMDClass  = 0,
+  parameter int unsigned                    EnableSIMDMask = 0,
   // Do not change
   localparam int unsigned NumLanes     = fpnew_pkg::max_num_lanes(Features.Width, Features.FpFmtMask, Features.EnableVectors),
   localparam type         MaskType     = logic [NumLanes-1:0],
@@ -32,7 +28,6 @@ module fpnew_top #(
 ) (
   input logic                               clk_i,
   input logic                               rst_ni,
-  input logic [31:0]                        hart_id_i,
   // Input signals
   input logic [NUM_OPERANDS-1:0][WIDTH-1:0] operands_i,
   input fpnew_pkg::roundmode_e              rnd_mode_i,
@@ -99,7 +94,7 @@ module fpnew_top #(
 
   // Filter out the mask if not used
   MaskType simd_mask;
-  assign simd_mask = simd_mask_i | ~{NumLanes{EnableSIMDMask}};
+  assign simd_mask = simd_mask_i | ~{NumLanes{logic'(EnableSIMDMask)}};
 
   // -------------------------
   // Generate Operation Blocks
@@ -122,20 +117,16 @@ module fpnew_top #(
       .OpGroup       ( fpnew_pkg::opgroup_e'(opgrp)    ),
       .Width         ( WIDTH                           ),
       .EnableVectors ( Features.EnableVectors          ),
-      .PulpDivsqrt   ( PulpDivsqrt                     ),
       .FpFmtMask     ( Features.FpFmtMask              ),
       .IntFmtMask    ( Features.IntFmtMask             ),
       .FmtPipeRegs   ( Implementation.PipeRegs[opgrp]  ),
       .FmtUnitTypes  ( Implementation.UnitTypes[opgrp] ),
       .PipeConfig    ( Implementation.PipeConfig       ),
       .TagType       ( TagType                         ),
-      .TrueSIMDClass ( TrueSIMDClass                   ),
-      .CompressedVecCmpResult ( CompressedVecCmpResult ),
-      .StochasticRndImplementation ( StochasticRndImplementation )
+      .TrueSIMDClass ( TrueSIMDClass                   )
     ) i_opgroup_block (
       .clk_i,
       .rst_ni,
-      .hart_id_i,
       .operands_i      ( operands_i[NUM_OPS-1:0] ),
       .is_boxed_i      ( input_boxed             ),
       .rnd_mode_i,

@@ -10,8 +10,10 @@
 // specific language governing permissions and limitations under the License.
 //
 // Authors:
-// - Luca Valente <luca.valente@unibo.it>
 // - Andreas Kurth <akurth@iis.ee.ethz.ch>
+// - Fabian Schuiki <fschuiki@iis.ee.ethz.ch>
+// - Florian Zaruba <zarubaf@iis.ee.ethz.ch>
+// - Luca Valente <luca.valente2@unibo.it>
 
 `include "axi/assign.svh"
 `include "axi/typedef.svh"
@@ -56,12 +58,7 @@ module axi_cdc_src #(
 );
 
   cdc_fifo_gray_src #(
-    // Workaround for a bug in Questa (see comment in `axi_cdc_dst` for details).
-`ifdef QUESTA
     .T         ( logic [$bits(aw_chan_t)-1:0] ),
-`else
-    .T         ( aw_chan_t                    ),
-`endif
     .LOG_DEPTH ( LogDepth                     )
   ) i_cdc_fifo_gray_src_aw (
     .src_clk_i,
@@ -75,11 +72,7 @@ module axi_cdc_src #(
   );
 
   cdc_fifo_gray_src #(
-`ifdef QUESTA
     .T         ( logic [$bits(w_chan_t)-1:0]  ),
-`else
-    .T         ( w_chan_t                     ),
-`endif
     .LOG_DEPTH ( LogDepth                     )
   ) i_cdc_fifo_gray_src_w (
     .src_clk_i,
@@ -93,11 +86,7 @@ module axi_cdc_src #(
   );
 
   cdc_fifo_gray_dst #(
-`ifdef QUESTA
     .T         ( logic [$bits(b_chan_t)-1:0]  ),
-`else
-    .T         ( b_chan_t                     ),
-`endif
     .LOG_DEPTH ( LogDepth                     )
   ) i_cdc_fifo_gray_dst_b (
     .dst_clk_i    ( src_clk_i                   ),
@@ -111,11 +100,7 @@ module axi_cdc_src #(
   );
 
   cdc_fifo_gray_src #(
-`ifdef QUESTA
     .T         ( logic [$bits(ar_chan_t)-1:0] ),
-`else
-    .T         ( ar_chan_t                    ),
-`endif
     .LOG_DEPTH ( LogDepth                     )
   ) i_cdc_fifo_gray_src_ar (
     .src_clk_i,
@@ -129,11 +114,7 @@ module axi_cdc_src #(
   );
 
   cdc_fifo_gray_dst #(
-`ifdef QUESTA
     .T         ( logic [$bits(r_chan_t)-1:0]  ),
-`else
-    .T         ( r_chan_t                     ),
-`endif
     .LOG_DEPTH ( LogDepth                     )
   ) i_cdc_fifo_gray_dst_r (
     .dst_clk_i    ( src_clk_i                   ),

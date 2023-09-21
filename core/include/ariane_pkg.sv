@@ -31,6 +31,14 @@ package ariane_pkg;
     // This is the new user config interface system. If you need to parameterize something
     // within Ariane add a field here and assign a default value to the config. Please make
     // sure to add a propper parameter check to the `check_cfg` function.
+    typedef struct packed {
+      int unsigned dummy;
+    } cva6_cfg_t;
+
+    localparam cva6_cfg_t cva6_cfg_empty = {
+      '0
+    };
+
     localparam NrMaxRules = 16;
     typedef struct packed {
       int                               RASDepth;
@@ -49,9 +57,6 @@ package ariane_pkg;
       // cache config
       bit                               AxiCompliant;          // set to 1 when using in conjunction with 64bit AXI bus adapter
       bit                               SwapEndianess;         // set to 1 to swap endianess inside L1.5 openpiton adapter
-      // CLIC
-      int unsigned                      CLICNumInterruptSrc;   // number of interrupt signals from the CLIC
-      int unsigned                      CLICIntCtlBits;        // TODO(@niwis,@alex96295): specify
       //
       logic [63:0]                      DmBaseAddress;         // offset of the debug module
       int unsigned                      NrPMPEntries;          // Number of PMP entries
@@ -73,9 +78,6 @@ package ariane_pkg;
       NrCachedRegionRules:   unsigned'(1),
       CachedRegionAddrBase:  1024'({64'h8000_0000}),
       CachedRegionLength:    1024'({64'h40000000}),
-      // CLIC
-      CLICNumInterruptSrc:    256,
-      CLICIntCtlBits:         8,
       //  cache config
       AxiCompliant:           1'b1,
       SwapEndianess:          1'b0,
@@ -138,7 +140,6 @@ package ariane_pkg;
     localparam TRANS_ID_BITS = $clog2(NR_SB_ENTRIES); // depending on the number of scoreboard entries we need that many bits
                                                       // to uniquely identify the entry in the scoreboard
     localparam ASID_WIDTH    = (riscv::XLEN == 64) ? 16 : 1;
-    localparam VMID_WIDTH    = (riscv::XLEN == 64) ? 14 : 1;
     localparam BITS_SATURATION_COUNTER = 2;
     localparam NR_COMMIT_PORTS = cva6_config_pkg::CVA6ConfigNrCommitPorts;
 
@@ -172,14 +173,15 @@ package ariane_pkg;
     localparam bit RVD = (riscv::IS_XLEN64 ? 1:0) & riscv::FPU_EN;              // Is D extension enabled for only 64 bit CPU
 `endif
     localparam bit RVA = cva6_config_pkg::CVA6ConfigAExtEn; // Is A extension enabled
-    localparam bit RVSCLIC = cva6_config_pkg::CVA6ConfigSclicExtEn; // Is CLIC extension enabled
-    localparam bit RVH = cva6_config_pkg::CVA6ConfigHExtEn; // Is H extension enabled (disabled by default)
+    localparam bit RVV = cva6_config_pkg::CVA6ConfigVExtEn;
+
+    // Is the accelerator enabled?
+    localparam bit ENABLE_ACCELERATOR = RVV; // Currently only used by V extension (Ara)
 
     // Transprecision floating-point extensions configuration
-    localparam bit XF16    = cva6_config_pkg::CVA6ConfigF16En; // Is half-precision float extension (Xf16) enabled
+    localparam bit XF16    = cva6_config_pkg::CVA6ConfigF16En | RVV; // Is half-precision float extension (Xf16) enabled
     localparam bit XF16ALT = cva6_config_pkg::CVA6ConfigF16AltEn; // Is alternative half-precision float extension (Xf16alt) enabled
     localparam bit XF8     = cva6_config_pkg::CVA6ConfigF8En; // Is quarter-precision float extension (Xf8) enabled
-    localparam bit XF8ALT  = cva6_config_pkg::CVA6ConfigF8AltEn; // Is alternative quarter-precision float extension (Xf8alt) enabled (not yet supported on CVA6)
     localparam bit XFVEC   = cva6_config_pkg::CVA6ConfigFVecEn; // Is vectorial float extension (Xfvec) enabled
 
     // Transprecision float unit
@@ -188,15 +190,13 @@ package ariane_pkg;
     localparam int unsigned LAT_COMP_FP16    = 'd1;
     localparam int unsigned LAT_COMP_FP16ALT = 'd1;
     localparam int unsigned LAT_COMP_FP8     = 'd1;
-    localparam int unsigned LAT_COMP_FP8ALT  = 'd1;
     localparam int unsigned LAT_DIVSQRT      = 'd2;
     localparam int unsigned LAT_NONCOMP      = 'd1;
     localparam int unsigned LAT_CONV         = 'd2;
-    localparam int unsigned LAT_SDOTP        = 'd2;
 
     // --------------------------------------
     // vvvv Don't change these by hand! vvvv
-    localparam bit FP_PRESENT = RVF | RVD | XF16 | XF16ALT | XF8 | XF8ALT;
+    localparam bit FP_PRESENT = RVF | RVD | XF16 | XF16ALT | XF8;
 
     // Length of widest floating-point format
     localparam FLEN    = RVD     ? 64 : // D ext.
@@ -206,13 +206,12 @@ package ariane_pkg;
                          XF8     ? 8 :  // Xf8 ext.
                          1;             // Unused in case of no FP
 
-    localparam bit NSX = XF16 | XF16ALT | XF8 | XF8ALT | XFVEC; // Are non-standard extensions present?
+    localparam bit NSX = XF16 | XF16ALT | XF8 | XFVEC; // Are non-standard extensions present?
 
     localparam bit RVFVEC     = RVF     & XFVEC & FLEN>32; // FP32 vectors available if vectors and larger fmt enabled
     localparam bit XF16VEC    = XF16    & XFVEC & FLEN>16; // FP16 vectors available if vectors and larger fmt enabled
     localparam bit XF16ALTVEC = XF16ALT & XFVEC & FLEN>16; // FP16ALT vectors available if vectors and larger fmt enabled
     localparam bit XF8VEC     = XF8     & XFVEC & FLEN>8;  // FP8 vectors available if vectors and larger fmt enabled
-    localparam bit XF8ALTVEC  = XF8ALT  & XFVEC & FLEN>8;  // FP8ALT vectors available if vectors and larger fmt enabled
     // ^^^^ until here ^^^^
     // ---------------------
 
@@ -223,12 +222,12 @@ package ariane_pkg;
                                       | (riscv::XLEN'(RVC) <<  2)                         // C - Compressed extension
                                       | (riscv::XLEN'(RVD) <<  3)                         // D - Double precsision floating-point extension
                                       | (riscv::XLEN'(RVF) <<  5)                         // F - Single precsision floating-point extension
-                                      | (riscv::XLEN'(RVH) <<  7)                         // H - Hypervisor mode implemented
                                       | (riscv::XLEN'(1  ) <<  8)                         // I - RV32I/64I/128I base ISA
                                       | (riscv::XLEN'(1  ) << 12)                         // M - Integer Multiply/Divide extension
                                       | (riscv::XLEN'(0  ) << 13)                         // N - User level interrupts supported
                                       | (riscv::XLEN'(1  ) << 18)                         // S - Supervisor mode implemented
                                       | (riscv::XLEN'(1  ) << 20)                         // U - User mode implemented
+                                      | (riscv::XLEN'(RVV) << 21)                         // V - Vector extension
                                       | (riscv::XLEN'(NSX) << 23)                         // X - Non-standard extensions present
                                       | ((riscv::XLEN == 64 ? 2 : 1) << riscv::XLEN-2);  // MXL
 
@@ -237,8 +236,8 @@ package ariane_pkg;
 
     localparam bit CVXIF_PRESENT = cva6_config_pkg::CVA6ConfigCvxifEn;
 
-    // when cvx interface is present, use an additional writeback port
-    localparam NR_WB_PORTS = CVXIF_PRESENT ? 5 : 4;
+    // when cvx interface or the accelerator port is present, use an additional writeback port
+    localparam NR_WB_PORTS = (CVXIF_PRESENT || ENABLE_ACCELERATOR) ? 5 : 4;
 
     // Read ports for general purpose register files
     localparam NR_RGPR_PORTS = 2;
@@ -295,27 +294,6 @@ package ariane_pkg;
                                                     | riscv::SSTATUS_FS
                                                     | riscv::SSTATUS_SUM
                                                     | riscv::SSTATUS_MXR;
-
-    localparam logic [63:0] HSTATUS_WRITE_MASK      = riscv::HSTATUS_VSBE
-                                                    | riscv::HSTATUS_GVA
-                                                    | riscv::HSTATUS_SPV
-                                                    | riscv::HSTATUS_SPVP
-                                                    | riscv::HSTATUS_HU
-                                                    | riscv::HSTATUS_VTVM
-                                                    | riscv::HSTATUS_VTW
-                                                    | riscv::HSTATUS_VTSR;
-
-    localparam logic [63:0] ENVCFG_WRITE_MASK       = riscv::MENVCFG_FIOM;
-
-    // hypervisor delegable interrupts
-    localparam logic [riscv::XLEN-1:0] HS_DELEG_INTERRUPTS = riscv::MIP_VSSIP
-                                                    | riscv::MIP_VSTIP
-                                                    | riscv::MIP_VSEIP;
-    // virtual supervisor delegable interrupts
-    localparam logic [riscv::XLEN-1:0] VS_DELEG_INTERRUPTS = riscv::MIP_VSSIP
-                                                    | riscv::MIP_VSTIP
-                                                    | riscv::MIP_VSEIP;
-
     // ---------------
     // AXI
     // ---------------
@@ -352,9 +330,6 @@ package ariane_pkg;
          riscv::xlen_t       cause; // cause of exception
          riscv::xlen_t       tval;  // additional information of causing exception (e.g.: instruction causing it),
                              // address of LD/ST fault
-         logic [riscv::GPLEN-1:0] tval2; // additional information when the causing exception in a guest exception
-         riscv::xlen_t       tinst;  // transformed instruction information
-         logic        gva;          // signals when a guest virtual address is written to tval
          logic        valid;
     } exception_t;
 
@@ -429,7 +404,8 @@ package ariane_pkg;
         CSR,       // 6
         FPU,       // 7
         FPU_VEC,   // 8
-        CVXIF      // 9
+        CVXIF,     // 9
+        ACCEL      // 10
     } fu_t;
 
     localparam EXC_OFF_RST      = 8'h80;
@@ -443,7 +419,6 @@ package ariane_pkg;
       riscv::xlen_t       mie;
       riscv::xlen_t       mip;
       riscv::xlen_t       mideleg;
-      riscv::xlen_t       hideleg;
       logic        sie;
       logic        global_enable;
     } irq_ctrl_t;
@@ -525,6 +500,7 @@ package ariane_pkg;
     // ---------------
     // EX Stage
     // ---------------
+
     typedef enum logic [7:0] { // basic ALU op
                                ADD, SUB, ADDW, SUBW,
                                // logic operations
@@ -538,11 +514,9 @@ package ariane_pkg;
                                // set lower than operations
                                SLTS, SLTU,
                                // CSR functions
-                               MRET, SRET, DRET, ECALL, WFI, FENCE, FENCE_I, SFENCE_VMA, HFENCE_VVMA, HFENCE_GVMA, CSR_WRITE, CSR_READ, CSR_SET, CSR_CLEAR, FENCE_T,
+                               MRET, SRET, DRET, ECALL, WFI, FENCE, FENCE_I, SFENCE_VMA, CSR_WRITE, CSR_READ, CSR_SET, CSR_CLEAR,
                                // LSU functions
                                LD, SD, LW, LWU, SW, LH, LHU, SH, LB, SB, LBU,
-                               // Hypervisor Virtual-Machine Load and Store Instructions
-                               HLV_B, HLV_BU, HLV_H, HLV_HU, HLVX_HU, HLV_W, HLVX_WU, HSV_B, HSV_H, HSV_W, HLV_WU, HLV_D, HSV_D,
                                // Atomic Memory Operations
                                AMO_LRW, AMO_LRD, AMO_SCW, AMO_SCD,
                                AMO_SWAPW, AMO_ADDW, AMO_ANDW, AMO_ORW, AMO_XORW, AMO_MAXW, AMO_MAXWU, AMO_MINW, AMO_MINWU,
@@ -586,7 +560,9 @@ package ariane_pkg;
                                // Shift with Add (Bitmanip)
                                SH1ADD, SH2ADD, SH3ADD,
                                // Bitmanip Logical with negate op (Bitmanip)
-                               ANDN, ORN, XNOR
+                               ANDN, ORN, XNOR,
+                               // Accelerator operations
+                               ACCEL_OP, ACCEL_OP_FS1, ACCEL_OP_FD, ACCEL_OP_LOAD, ACCEL_OP_STORE
                              } fu_op;
 
     typedef struct packed {
@@ -618,7 +594,8 @@ package ariane_pkg;
                 FMV_F2X,                         // FPR-GPR Moves
                 FCMP,                            // Comparisons
                 FCLASS,                          // Classifications
-                [VFMIN:VFCPKCD_D] : return 1'b1; // Additional Vectorial FP ops
+                [VFMIN:VFCPKCD_D],               // Additional Vectorial FP ops
+                ACCEL_OP_FS1      : return 1'b1; // Accelerator instructions
                 default           : return 1'b0; // all other ops
             endcase
         end else
@@ -664,7 +641,8 @@ package ariane_pkg;
                 FSGNJ,                               // Sign Injections
                 FMV_X2F,                             // GPR-FPR Moves
                 [VFMIN:VFSGNJX],                     // Vectorial MIN/MAX and SGNJ
-                [VFCPKAB_S:VFCPKCD_D] : return 1'b1; // Vectorial FP cast and pack ops
+                [VFCPKAB_S:VFCPKCD_D],               // Vectorial FP cast and pack ops
+                ACCEL_OP_FD           : return 1'b1; // Accelerator instructions
                 default               : return 1'b0; // all other ops
             endcase
         end else
@@ -683,11 +661,7 @@ package ariane_pkg;
     typedef struct packed {
         logic                           valid;
         logic [riscv::VLEN-1:0]         vaddr;
-        logic [riscv::XLEN-1:0]         tinst;
-        logic                           hs_ld_st_inst;
-        logic                           hlvx_inst;
         logic                           overflow;
-        logic                           g_overflow;
         riscv::xlen_t                   data;
         logic [(riscv::XLEN/8)-1:0]     be;
         fu_t                            fu;
@@ -740,6 +714,7 @@ package ariane_pkg;
         logic [(riscv::XLEN/8)-1:0] lsu_rmask;   // information needed by RVFI
         logic [(riscv::XLEN/8)-1:0] lsu_wmask;   // information needed by RVFI
         riscv::xlen_t               lsu_wdata;   // information needed by RVFI
+        logic                       vfp;         // is this a vector floating-point instruction?
     } scoreboard_entry_t;
 
     // ---------------
@@ -754,6 +729,7 @@ package ariane_pkg;
     // Performance counter
     // -------------------
     localparam bit PERF_COUNTER_EN = cva6_config_pkg::CVA6ConfigPerfCounterEn;
+    localparam int unsigned MHPMCounterNum = 6;
 
     // --------------------
     // Atomics
@@ -784,19 +760,6 @@ package ariane_pkg;
         riscv::pte_t           content;
     } tlb_update_t;
 
-    typedef struct packed {
-        logic                  valid;      // valid flag
-        logic                  is_s_2M;
-        logic                  is_s_1G;
-        logic                  is_g_2M;
-        logic                  is_g_1G;
-        logic [28:0]           vpn;
-        logic [ASID_WIDTH-1:0] asid;
-        logic [VMID_WIDTH-1:0] vmid;
-        riscv::pte_t           content;
-        riscv::pte_t           g_content;
-    } tlb_update_sv39x4_t;
-
     // Bits required for representation of physical address space as 4K pages
     // (e.g. 27*4K == 39bit address space).
     localparam PPN4K_WIDTH = 38;
@@ -812,8 +775,7 @@ package ariane_pkg;
     typedef enum logic [1:0] {
       FE_NONE,
       FE_INSTR_ACCESS_FAULT,
-      FE_INSTR_PAGE_FAULT,
-      FE_INSTR_GUEST_PAGE_FAULT
+      FE_INSTR_PAGE_FAULT
     } frontend_exception_t;
 
     // ----------------------
@@ -1008,7 +970,7 @@ package ariane_pkg;
     // ----------------------
     function automatic logic [1:0] extract_transfer_size(fu_op op);
         case (op)
-            LD, HLV_D, SD, HSV_D, FLD, FSD,
+            LD, SD, FLD, FSD,
             AMO_LRD,   AMO_SCD,
             AMO_SWAPD, AMO_ADDD,
             AMO_ANDD,  AMO_ORD,
@@ -1017,8 +979,7 @@ package ariane_pkg;
             AMO_MINDU: begin
                 return 2'b11;
             end
-            LW, LWU, HLV_W, HLV_WU, HLVX_WU,
-            SW, HSV_W, FLW, FSW,
+            LW, LWU, SW, FLW, FSW,
             AMO_LRW,   AMO_SCW,
             AMO_SWAPW, AMO_ADDW,
             AMO_ANDW,  AMO_ORW,
@@ -1027,58 +988,9 @@ package ariane_pkg;
             AMO_MINWU: begin
                 return 2'b10;
             end
-            LH, LHU, HLV_H, HLV_HU, HLVX_HU, SH, HSV_H, FLH, FSH: return 2'b01;
-            LB, LBU, HLV_B, HLV_BU, SB, HSV_B, FLB, FSB: return 2'b00;
+            LH, LHU, SH, FLH, FSH: return 2'b01;
+            LB, LBU, SB, FLB, FSB: return 2'b00;
             default:     return 2'b11;
         endcase
     endfunction
-
-    // ----------------------
-    // MMU Functions
-    // ----------------------
-
-    // checks if final translation page size is 1G when H-extension is enabled
-    function automatic logic is_trans_1G(input logic s_st_enbl, input logic g_st_enbl, input logic is_s_1G, input logic is_g_1G);
-      return (((is_s_1G && s_st_enbl) || !s_st_enbl) && ((is_g_1G && g_st_enbl) || !g_st_enbl));
-    endfunction : is_trans_1G
-
-    // checks if final translation page size is 2M when H-extension is enabled
-    function automatic logic is_trans_2M(input logic s_st_enbl, input logic g_st_enbl, input logic is_s_1G, input logic is_s_2M, input logic is_g_1G, input logic is_g_2M);
-      return  (s_st_enbl && g_st_enbl) ? 
-                ((is_s_2M && (is_g_1G || is_g_2M)) || (is_g_2M && (is_s_1G || is_s_2M))) :
-                ((is_s_2M && s_st_enbl) || (is_g_2M && g_st_enbl));
-    endfunction : is_trans_2M
-
-    // computes the paddr based on the page size, ppn and offset
-    function automatic logic [(riscv::GPLEN-1):0] make_gpaddr(input logic s_st_enbl, input logic is_1G, input logic is_2M, input logic [(riscv::VLEN-1):0] vaddr, input riscv::pte_t pte);
-        logic [(riscv::GPLEN-1):0] gpaddr;
-        if (s_st_enbl) begin
-            gpaddr = {pte.ppn[(riscv::GPPNW-1):0], vaddr[11:0]};
-            // Giga page
-            if (is_1G)
-                gpaddr[29:12] = vaddr[29:12];
-            // Mega page
-            if (is_2M)
-                gpaddr[20:12] = vaddr[20:12];
-        end else begin
-            gpaddr = vaddr[(riscv::GPLEN-1):0];
-        end
-        return gpaddr;
-    endfunction : make_gpaddr
-
-     // computes the final gppn based on the guest physical address
-    function automatic logic [(riscv::GPPNW-1):0] make_gppn(input logic s_st_enbl, input logic is_2M, input logic is_1G, input logic [28:0] vpn, input riscv::pte_t pte);
-        logic [(riscv::GPPNW-1):0] gppn;
-        if (s_st_enbl) begin
-            gppn = pte.ppn[(riscv::GPPNW-1):0];
-            if(is_2M)
-                gppn[8:0] = vpn[8:0];
-            if(is_1G)
-                gppn[17:0] = vpn[17:0];
-        end else begin
-            gppn = vpn;
-        end
-        return gppn;
-    endfunction : make_gppn
-
 endpackage

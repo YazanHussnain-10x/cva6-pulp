@@ -14,6 +14,7 @@
 
 
 module std_nbdcache import std_cache_pkg::*; import ariane_pkg::*; #(
+    parameter ariane_pkg::cva6_cfg_t cva6_cfg = ariane_pkg::cva6_cfg_empty,
     parameter ariane_cfg_t ArianeCfg        = ArianeDefaultConfig, // contains cacheable regions
     parameter int unsigned AXI_ADDR_WIDTH   = 0,
     parameter int unsigned AXI_DATA_WIDTH   = 0,
@@ -28,9 +29,6 @@ module std_nbdcache import std_cache_pkg::*; import ariane_pkg::*; #(
     input  logic                           flush_i,     // high until acknowledged
     output logic                           flush_ack_o, // send a single cycle acknowledge signal when the cache is flushed
     output logic                           miss_o,      // we missed on a LD/ST
-    output logic                           busy_o,
-    input  logic                           stall_i,   // stall new memory requests
-    input  logic                           init_ni,
     // AMOs
     input  amo_req_t                       amo_req_i,
     output amo_resp_t                      amo_resp_o,
@@ -89,11 +87,6 @@ import std_cache_pkg::*;
     cache_line_t                         wdata_ram;
     cache_line_t [DCACHE_SET_ASSOC-1:0]  rdata_ram;
     cl_be_t                              be_ram;
-    vldrty_t [DCACHE_SET_ASSOC-1:0]      be_valid_dirty_ram;
-
-    // Busy signals
-    logic miss_handler_busy;
-    assign busy_o = |busy | miss_handler_busy;
 
     // ------------------
     // Cache Controller
@@ -101,11 +94,11 @@ import std_cache_pkg::*;
     generate
         for (genvar i = 0; i < 3; i++) begin : master_ports
             cache_ctrl  #(
+                .cva6_cfg              ( cva6_cfg             ),
                 .ArianeCfg             ( ArianeCfg            )
             ) i_cache_ctrl (
                 .bypass_i              ( ~enable_i            ),
                 .busy_o                ( busy            [i]  ),
-                .stall_i               ( stall_i | flush_i    ),
                 // from core
                 .req_port_i            ( req_ports_i     [i]  ),
                 .req_port_o            ( req_ports_o     [i]  ),
@@ -141,6 +134,7 @@ import std_cache_pkg::*;
     // Miss Handling Unit
     // ------------------
     miss_handler #(
+        .cva6_cfg               ( cva6_cfg             ),
         .NR_PORTS               ( 3                    ),
         .AXI_ADDR_WIDTH         ( AXI_ADDR_WIDTH       ),
         .AXI_DATA_WIDTH         ( AXI_DATA_WIDTH       ),
@@ -148,7 +142,6 @@ import std_cache_pkg::*;
         .axi_req_t              ( axi_req_t            ),
         .axi_rsp_t              ( axi_rsp_t            )
     ) i_miss_handler (
-        .busy_o                 ( miss_handler_busy    ),
         .flush_i                ( flush_i              ),
         .busy_i                 ( |busy                ),
         // AMOs
@@ -222,20 +215,21 @@ import std_cache_pkg::*;
     // Valid/Dirty Regs
     // ----------------
 
-    vldrty_t [DCACHE_SET_ASSOC-1:0] dirty_wdata, dirty_rdata;
+    // align each valid/dirty bit pair to a byte boundary in order to leverage byte enable signals.
+    // note: if you have an SRAM that supports flat bit enables for your target technology,
+    // you can use it here to save the extra 4x overhead introduced by this workaround.
+    logic [4*DCACHE_DIRTY_WIDTH-1:0] dirty_wdata, dirty_rdata;
 
     for (genvar i = 0; i < DCACHE_SET_ASSOC; i++) begin
-      assign dirty_wdata[i]     = '{dirty: wdata_ram.dirty, valid: wdata_ram.valid};
-      assign rdata_ram[i].dirty = dirty_rdata[i].dirty;
-      assign rdata_ram[i].valid = dirty_rdata[i].valid;
-      assign be_valid_dirty_ram[i].valid = be_ram.vldrty[i].valid;
-      assign be_valid_dirty_ram[i].dirty = be_ram.vldrty[i].dirty;
+        assign dirty_wdata[8*i]   = wdata_ram.dirty;
+        assign dirty_wdata[8*i+1] = wdata_ram.valid;
+        assign rdata_ram[i].dirty = dirty_rdata[8*i];
+        assign rdata_ram[i].valid = dirty_rdata[8*i+1];
     end
 
     sram #(
         .USER_WIDTH ( 1                                ),
-        .DATA_WIDTH ( DCACHE_SET_ASSOC*$bits(vldrty_t) ),
-        .BYTE_WIDTH ( 1                                ),
+        .DATA_WIDTH ( 4*DCACHE_DIRTY_WIDTH             ),
         .NUM_WORDS  ( DCACHE_NUM_WORDS                 )
     ) valid_dirty_sram (
         .clk_i   ( clk_i                               ),
@@ -245,7 +239,7 @@ import std_cache_pkg::*;
         .addr_i  ( addr_ram[DCACHE_INDEX_WIDTH-1:DCACHE_BYTE_OFFSET] ),
         .wuser_i ( '0                                  ),
         .wdata_i ( dirty_wdata                         ),
-        .be_i    ( be_valid_dirty_ram                  ),
+        .be_i    ( be_ram.vldrty                       ),
         .ruser_o (                                     ),
         .rdata_o ( dirty_rdata                         )
     );
@@ -254,6 +248,7 @@ import std_cache_pkg::*;
     // Tag Comparison and memory arbitration
     // ------------------------------------------------
     tag_cmp #(
+        .cva6_cfg           ( cva6_cfg           ),
         .NR_PORTS           ( 4                  ),
         .ADDR_WIDTH         ( DCACHE_INDEX_WIDTH ),
         .DCACHE_SET_ASSOC   ( DCACHE_SET_ASSOC   )

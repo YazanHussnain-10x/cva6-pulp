@@ -19,7 +19,7 @@ import uvm_pkg::*;
 
 `include "uvm_macros.svh"
 
-`define MAIN_MEM(P) dut.i_sram.i_tc_sram.init_val[(``P``)]
+`define MAIN_MEM(P) dut.i_sram.gen_cut[0].i_tc_sram_wrapper.i_tc_sram.init_val[(``P``)]
 // `define USER_MEM(P) dut.i_sram.gen_cut[0].gen_mem.gen_mem_user.i_tc_sram_wrapper_user.i_tc_sram.init_val[(``P``)]
 
 import "DPI-C" function read_elf(input string filename);
@@ -34,7 +34,7 @@ module ariane_tb;
     // toggle with RTC period
     localparam int unsigned RTC_CLOCK_PERIOD = 30.517us;
 
-    localparam NUM_WORDS = 2**24;
+    localparam NUM_WORDS = 2**16;
     logic clk_i;
     logic rst_ni;
     logic rtc_i;

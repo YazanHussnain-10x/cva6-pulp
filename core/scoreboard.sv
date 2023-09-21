@@ -13,6 +13,7 @@
 // Description: Scoreboard - keeps track of all decoded, issued and committed instructions
 
 module scoreboard #(
+  parameter ariane_pkg::cva6_cfg_t cva6_cfg = ariane_pkg::cva6_cfg_empty,
   parameter int unsigned NR_ENTRIES      = 8, // must be a power of 2
   parameter int unsigned NR_WB_PORTS     = 1,
   parameter int unsigned NR_COMMIT_PORTS = 2
@@ -190,7 +191,7 @@ module scoreboard #(
     // Commit Port
     // ------------
     // we've got an acknowledge from commit
-    for (logic [BITS_ENTRIES-1:0] i = 0; i < NR_COMMIT_PORTS; i++) begin
+    for (logic [NR_COMMIT_PORTS-1:0] i = 0; i < NR_COMMIT_PORTS; i++) begin
       if (commit_ack_i[i]) begin
         // this instruction is no longer in issue e.g.: it is considered finished
         mem_n[commit_pointer_q[i]].issued     = 1'b0;

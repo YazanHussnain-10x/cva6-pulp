@@ -15,13 +15,15 @@
 
 
 module issue_read_operands import ariane_pkg::*; #(
+    parameter ariane_pkg::cva6_cfg_t cva6_cfg = ariane_pkg::cva6_cfg_empty,
     parameter int unsigned NR_COMMIT_PORTS = 2
 )(
     input  logic                                   clk_i,    // Clock
     input  logic                                   rst_ni,   // Asynchronous reset active low
-    input  logic                                   rst_uarch_ni,
     // flush
     input  logic                                   flush_i,
+    // stall
+    input  logic                                   stall_i,
     // coming from rename
     input  scoreboard_entry_t                      issue_instr_i,
     input  logic                                   issue_instr_valid_i,
@@ -45,7 +47,6 @@ module issue_read_operands import ariane_pkg::*; #(
     output riscv::xlen_t                           rs2_forwarding_o,  // unregistered version of fu_data_o.operandb
     output logic [riscv::VLEN-1:0]                 pc_o,
     output logic                                   is_compressed_instr_o,
-    output riscv::xlen_t                           tinst_o,          // Transformed instruction
     // ALU 1
     input  logic                                   flu_ready_i,      // Fixed latency unit ready to accept a new request
     output logic                                   alu_valid_o,      // Output is valid
@@ -80,7 +81,7 @@ module issue_read_operands import ariane_pkg::*; #(
     // input  scoreboard_entry     commit_instr_i,
     // output logic                commit_ack_o
 );
-    logic stall;   
+    logic stall;
     logic fu_busy; // functional unit is busy
     riscv::xlen_t    operand_a_regfile, operand_b_regfile;  // operands coming from regfile
     rs3_len_t operand_c_regfile; // third operand from fp regfile or gp regfile if NR_RGPR_PORTS == 3
@@ -103,7 +104,6 @@ module issue_read_operands import ariane_pkg::*; #(
     logic [TRANS_ID_BITS-1:0] trans_id_n, trans_id_q;
     fu_op operator_n, operator_q; // operation to perform
     fu_t  fu_n,       fu_q; // functional unit to use
-    riscv::xlen_t tinst_n, tinst_q; // transformed instruction
 
     // forwarding signals
     logic forward_rs1, forward_rs2, forward_rs3;
@@ -133,7 +133,6 @@ module issue_read_operands import ariane_pkg::*; #(
     assign fpu_rm_o            = fpu_rm_q;
     assign cvxif_valid_o       = CVXIF_PRESENT ? cvxif_valid_q : '0;
     assign cvxif_off_instr_o   = CVXIF_PRESENT ? cvxif_off_instr_q : '0;
-    assign tinst_o             = tinst_q;
     assign stall_issue_o       = stall;
     // ---------------
     // Issue Stage
@@ -164,7 +163,7 @@ module issue_read_operands import ariane_pkg::*; #(
     // check that all operands are available, otherwise stall
     // forward corresponding register
     always_comb begin : operands_available
-        stall = 1'b0;
+        stall = stall_i;
         // operand forwarding signals
         forward_rs1 = 1'b0;
         forward_rs2 = 1'b0;
@@ -183,7 +182,7 @@ module issue_read_operands import ariane_pkg::*; #(
             // check if the clobbering instruction is not a CSR instruction, CSR instructions can only
             // be fetched through the register file since they can't be forwarded
             // if the operand is available, forward it. CSRs don't write to/from FPR
-            if (rs1_valid_i && (is_rs1_fpr(issue_instr_i.op) ? 1'b1 : ((rd_clobber_gpr_i[issue_instr_i.rs1] != CSR) || (issue_instr_i.op == SFENCE_VMA || issue_instr_i.op == HFENCE_VVMA || issue_instr_i.op == HFENCE_GVMA)))) begin
+            if (rs1_valid_i && (is_rs1_fpr(issue_instr_i.op) ? 1'b1 : ((rd_clobber_gpr_i[issue_instr_i.rs1] != CSR) || (issue_instr_i.op == SFENCE_VMA)))) begin
                 forward_rs1 = 1'b1;
             end else begin // the operand is not available -> stall
                 stall = 1'b1;
@@ -193,7 +192,7 @@ module issue_read_operands import ariane_pkg::*; #(
         if (is_rs2_fpr(issue_instr_i.op) ? rd_clobber_fpr_i[issue_instr_i.rs2] != NONE
                                          : rd_clobber_gpr_i[issue_instr_i.rs2] != NONE) begin
             // if the operand is available, forward it. CSRs don't write to/from FPR
-            if (rs2_valid_i && (is_rs2_fpr(issue_instr_i.op) ? 1'b1 : ( (rd_clobber_gpr_i[issue_instr_i.rs2] != CSR) || (issue_instr_i.op == SFENCE_VMA || issue_instr_i.op == HFENCE_VVMA || issue_instr_i.op == HFENCE_GVMA))))  begin
+            if (rs2_valid_i && (is_rs2_fpr(issue_instr_i.op) ? 1'b1 : ( (rd_clobber_gpr_i[issue_instr_i.rs2] != CSR) || (issue_instr_i.op == SFENCE_VMA))))  begin
                 forward_rs2 = 1'b1;
             end else begin // the operand is not available -> stall
                 stall = 1'b1;
@@ -228,7 +227,6 @@ module issue_read_operands import ariane_pkg::*; #(
         trans_id_n = issue_instr_i.trans_id;
         fu_n       = issue_instr_i.fu;
         operator_n = issue_instr_i.op;
-        tinst_n    = issue_instr_i.ex.tinst;
         // or should we forward
         if (forward_rs1) begin
             operand_a_n  = rs1_i;
@@ -252,17 +250,17 @@ module issue_read_operands import ariane_pkg::*; #(
             // zero extend operand a
             operand_a_n = {{riscv::XLEN-5{1'b0}}, issue_instr_i.rs1[4:0]};
         end
-        // or is it an immediate (including PC), this is not the case for a store and control flow instructions
+        // or is it an immediate (including PC), this is not the case for a store, control flow, and accelerator instructions
         // also make sure operand B is not already used as an FP operand
-        if (issue_instr_i.use_imm && (issue_instr_i.fu != STORE) && (issue_instr_i.fu != CTRL_FLOW) && !is_rs2_fpr(issue_instr_i.op)) begin
+        if (issue_instr_i.use_imm && (issue_instr_i.fu != STORE) && (issue_instr_i.fu != CTRL_FLOW) && (issue_instr_i.fu != ACCEL) && !is_rs2_fpr(issue_instr_i.op)) begin
             operand_b_n = issue_instr_i.result;
         end
     end
 
     // FU select, assert the correct valid out signal (in the next cycle)
     // This needs to be like this to make verilator happy. I know its ugly.
-    always_ff @(posedge clk_i or negedge rst_uarch_ni) begin
-      if (!rst_uarch_ni) begin
+    always_ff @(posedge clk_i or negedge rst_ni) begin
+      if (!rst_ni) begin
         alu_valid_q    <= 1'b0;
         lsu_valid_q    <= 1'b0;
         mult_valid_q   <= 1'b0;
@@ -393,7 +391,7 @@ module issue_read_operands import ariane_pkg::*; #(
         end
         // after a multiplication was issued we can only issue another multiplication
         // otherwise we will get contentions on the fixed latency bus
-        if (mult_valid_q && issue_instr_i.fu != MULT) begin
+        if (mult_valid_q && issue_instr_i.fu inside {ALU, CTRL_FLOW, CSR}) begin
             issue_ack_o = 1'b0;
         end
     end
@@ -417,6 +415,7 @@ module issue_read_operands import ariane_pkg::*; #(
     end
     if (ariane_pkg::FPGA_EN) begin : gen_fpga_regfile
         ariane_regfile_fpga #(
+            .cva6_cfg       ( cva6_cfg        ),
             .DATA_WIDTH     ( riscv::XLEN     ),
             .NR_READ_PORTS  ( NR_RGPR_PORTS   ),
             .NR_WRITE_PORTS ( NR_COMMIT_PORTS ),
@@ -432,6 +431,7 @@ module issue_read_operands import ariane_pkg::*; #(
         );
     end else begin : gen_asic_regfile
         ariane_regfile #(
+            .cva6_cfg       ( cva6_cfg        ),
             .DATA_WIDTH     ( riscv::XLEN     ),
             .NR_READ_PORTS  ( NR_RGPR_PORTS   ),
             .NR_WRITE_PORTS ( NR_COMMIT_PORTS ),
@@ -464,6 +464,7 @@ module issue_read_operands import ariane_pkg::*; #(
             end
             if (ariane_pkg::FPGA_EN) begin : gen_fpga_fp_regfile
                 ariane_regfile_fpga #(
+                    .cva6_cfg       ( cva6_cfg        ),
                     .DATA_WIDTH     ( FLEN            ),
                     .NR_READ_PORTS  ( 3               ),
                     .NR_WRITE_PORTS ( NR_COMMIT_PORTS ),
@@ -479,6 +480,7 @@ module issue_read_operands import ariane_pkg::*; #(
                 );
             end else begin : gen_asic_fp_regfile
                 ariane_regfile #(
+                    .cva6_cfg       ( cva6_cfg        ),
                     .DATA_WIDTH     ( FLEN            ),
                     .NR_READ_PORTS  ( 3               ),
                     .NR_WRITE_PORTS ( NR_COMMIT_PORTS ),
@@ -506,15 +508,14 @@ module issue_read_operands import ariane_pkg::*; #(
     // ----------------------
     // Registers (ID <-> EX)
     // ----------------------
-    always_ff @(posedge clk_i or negedge rst_uarch_ni) begin
-        if (!rst_uarch_ni) begin
+    always_ff @(posedge clk_i or negedge rst_ni) begin
+        if (!rst_ni) begin
             operand_a_q           <= '{default: 0};
             operand_b_q           <= '{default: 0};
             imm_q                 <= '0;
             fu_q                  <= NONE;
             operator_q            <= ADD;
             trans_id_q            <= '0;
-            tinst_q               <= '0;
             pc_o                  <= '0;
             is_compressed_instr_o <= 1'b0;
             branch_predict_o      <= {cf_t'(0), {riscv::VLEN{1'b0}}};
@@ -525,7 +526,6 @@ module issue_read_operands import ariane_pkg::*; #(
             fu_q                  <= fu_n;
             operator_q            <= operator_n;
             trans_id_q            <= trans_id_n;
-            tinst_q               <= tinst_n;
             pc_o                  <= issue_instr_i.pc;
             is_compressed_instr_o <= issue_instr_i.is_compressed;
             branch_predict_o      <= issue_instr_i.bp;
