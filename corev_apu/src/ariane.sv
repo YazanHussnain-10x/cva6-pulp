@@ -84,6 +84,10 @@ module ariane import ariane_pkg::*; import ara_pkg::*;#(
   //  AXI  //
   ///////////
 
+  localparam NrAXIMasters = 1;
+  localparam AxiSocIdWidth  = AxiIdWidth - $clog2(NrAXIMasters);
+  localparam AxiCoreIdWidth = AxiSocIdWidth - 1;
+
   ariane_axi_req_t  ariane_narrow_axi_req;
   ariane_axi_rsp_t ariane_narrow_axi_resp;
   ara_axi_req_t     ariane_axi_req, ara_axi_req_inval, ara_axi_req;
@@ -233,7 +237,7 @@ module ariane import ariane_pkg::*; import ara_pkg::*;#(
   );
 
   axi_mux #(
-    .SlvAxiIDWidth(AxiIdWidth       ),
+    .SlvAxiIDWidth(AxiCoreIdWidth       ),
     .slv_ar_chan_t(ara_axi_ar_chan_t),
     .slv_aw_chan_t(ara_axi_aw_chan_t),
     .slv_b_chan_t (ara_axi_b_chan_t ),
